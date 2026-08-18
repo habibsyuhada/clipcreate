@@ -10,7 +10,7 @@ Aplikasi lokal untuk memotong video (mis. hasil download YouTube) menjadi bebera
 - Edit per clip (opsional): crop 9:16 / 1:1 / 16:9 dengan anchor, kecepatan 0.5x–2x, volume/fade/mute audio, teks overlay.
 - Render clip satu-satu atau semua sekaligus, lewat render queue di background (tidak blocking), status `queued → processing → done/error`.
 - Mode potong cepat (`-c copy`) otomatis dipakai jika clip tanpa edit apa pun, mode akurat (re-encode) otomatis dipakai jika ada edit.
-- Gabung (merge) beberapa clip terpilih menjadi satu file, resolusi/fps otomatis disamakan sebelum digabung.
+- Gabung (merge) beberapa clip terpilih menjadi satu file, resolusi/fps/audio otomatis disamakan sebelum digabung. Opsional pilih transisi antar clip (Fade / Dissolve) dengan durasi custom — otomatis dinonaktifkan (fallback ke potongan langsung) kalau ada clip yang terlalu pendek untuk durasi transisi yang diminta.
 - Daftar clip & pengaturan editnya tersimpan otomatis ke file JSON di sebelah video sumber — buka lagi videonya, daftar clip muncul kembali.
 
 ## Instalasi
@@ -79,3 +79,4 @@ clipcreate/
 - Render jalan berurutan (satu job aktif dalam satu waktu) di worker thread terpisah agar server tetap responsif.
 - Nama file output disanitasi otomatis agar aman untuk filesystem.
 - Thumbnail sprite (JPEG) & waveform (PNG) di-generate via FFmpeg lalu di-cache di folder tersembunyi `.<namavideo>.assets/` di sebelah video; regenerate otomatis kalau ukuran/waktu-modifikasi video berubah.
+- Transisi merge memakai filter `xfade` (video) + `acrossfade` (audio) berantai; durasi transisi otomatis di-clamp/dinonaktifkan kalau lebih panjang dari clip terpendek. Clip yang di-mute tetap diberi silent audio track saat merge supaya stream audio konsisten untuk crossfade.

@@ -245,15 +245,36 @@ def build_cut_command(
     return cmd
 
 
-def build_normalize_command(input_path: str, output_path: str, width: int, height: int, fps: int) -> list:
-    """Samakan resolusi/fps sebelum concat."""
+def build_normalize_command(
+    input_path: str, output_path: str, width: int, height: int, fps: int, has_audio: bool = True
+) -> list:
+    """Samakan resolusi/fps/audio sebelum concat atau transisi.
+
+    Kalau clip sumber tidak punya audio (mis. di-mute), tambahkan silent audio track
+    supaya tetap ada stream audio yang konsisten untuk di-concat/crossfade.
+    """
+    vf = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}"
+    )
+    if has_audio:
+        return [
+            "ffmpeg", "-y",
+            "-i", input_path,
+            "-vf", vf,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-ar", "48000", "-ac", "2",
+            "-movflags", "+faststart",
+            output_path,
+        ]
     return [
         "ffmpeg", "-y",
         "-i", input_path,
-        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}",
+        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+        "-vf", vf,
+        "-map", "0:v:0", "-map", "1:a:0", "-shortest",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-c:a", "aac", "-ar", "48000",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2",
         "-movflags", "+faststart",
         output_path,
     ]
@@ -267,6 +288,48 @@ def build_concat_command(list_file: str, output_path: str) -> list:
         "-c", "copy",
         output_path,
     ]
+
+
+TRANSITIONS = {"fade", "dissolve"}
+
+
+def build_transition_merge_command(
+    paths: list, durations: list, output_path: str, transition: str, trans_duration: float
+) -> list:
+    """Gabung beberapa video (sudah dinormalisasi resolusi/fps/audio-nya sama) dengan crossfade
+    berantai (xfade untuk video, acrossfade untuk audio). offset transisi ke-i dihitung dari
+    akumulasi durasi asli tiap clip dikurangi i * durasi transisi (rumus xfade berantai standar)."""
+    cmd = ["ffmpeg", "-y"]
+    for p in paths:
+        cmd += ["-i", p]
+
+    v_filters = []
+    a_filters = []
+    v_label = "0:v"
+    a_label = "0:a"
+    cumulative = durations[0]
+    n = len(paths)
+    for i in range(1, n):
+        offset = cumulative - trans_duration * i
+        out_v = f"v{i}" if i < n - 1 else "vout"
+        out_a = f"a{i}" if i < n - 1 else "aout"
+        v_filters.append(
+            f"[{v_label}][{i}:v]xfade=transition={transition}:duration={trans_duration:.3f}:offset={offset:.3f}[{out_v}]"
+        )
+        a_filters.append(f"[{a_label}][{i}:a]acrossfade=d={trans_duration:.3f}[{out_a}]")
+        v_label, a_label = out_v, out_a
+        cumulative += durations[i]
+
+    filter_complex = ";".join(v_filters + a_filters)
+    cmd += [
+        "-filter_complex", filter_complex,
+        "-map", "[vout]", "-map", "[aout]",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    return cmd
 
 
 def has_audio_stream(path: str) -> bool:

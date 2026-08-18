@@ -723,11 +723,17 @@ $("#mergeModeBtn").addEventListener("click", () => {
   renderClipList();
 });
 
+$("#mergeTransition").addEventListener("change", (e) => {
+  $("#mergeTransitionDuration").disabled = e.target.value === "none";
+});
+
 $("#mergeGoBtn").addEventListener("click", async () => {
   const checked = $$(".clip-merge-check:checked").map((el) => el.dataset.id);
   // urutkan sesuai urutan tampil di daftar (state.clips)
   const orderedIds = state.clips.filter((c) => checked.includes(c.id)).map((c) => c.id);
   const outputName = $("#mergeName").value.trim() || "merged.mp4";
+  const transition = $("#mergeTransition").value;
+  const transitionDuration = Number($("#mergeTransitionDuration").value) || 0.5;
   if (orderedIds.length < 2) {
     alert("Pilih minimal 2 clip untuk digabung");
     return;
@@ -738,7 +744,13 @@ $("#mergeGoBtn").addEventListener("click", async () => {
     const res = await api("/api/merge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ video_path: state.videoPath, clip_ids: orderedIds, output_name: outputName }),
+      body: JSON.stringify({
+        video_path: state.videoPath,
+        clip_ids: orderedIds,
+        output_name: outputName,
+        transition,
+        transition_duration: transitionDuration,
+      }),
     });
     pollMergeJob(res.job_id, statusEl);
   } catch (e) {
@@ -753,7 +765,8 @@ function pollMergeJob(jobId, statusEl) {
       const job = res.jobs[0];
       if (!job) return;
       if (job.status === "done") {
-        statusEl.textContent = `Selesai: ${job.meta.output_path}`;
+        const warning = job.meta && job.meta.warning;
+        statusEl.textContent = `Selesai: ${job.meta.output_path}` + (warning ? ` (⚠ ${warning})` : "");
         clearInterval(interval);
       } else if (job.status === "error") {
         statusEl.textContent = `Error: ${job.error}`;
