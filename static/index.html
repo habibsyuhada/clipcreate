@@ -38,8 +38,14 @@
 
     <div class="timeline-wrap">
       <div id="timeline" class="timeline">
-        <div id="timelinePlayhead" class="timeline-playhead"></div>
+        <img id="timelineThumbs" class="timeline-thumbs hidden" alt="" draggable="false">
+        <img id="timelineWaveform" class="timeline-waveform hidden" alt="" draggable="false">
         <div id="timelineSegments" class="timeline-segments"></div>
+        <div id="timelinePlayhead" class="timeline-playhead"></div>
+        <div id="timelineHoverPreview" class="timeline-hover-preview hidden">
+          <div id="hoverThumb" class="hover-thumb"></div>
+          <span id="hoverTime" class="mono"></span>
+        </div>
       </div>
     </div>
 

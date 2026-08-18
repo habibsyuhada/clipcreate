@@ -269,6 +269,41 @@ def build_concat_command(list_file: str, output_path: str) -> list:
     ]
 
 
+def has_audio_stream(path: str) -> bool:
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=index",
+        "-of", "csv=p=0",
+        path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode == 0 and result.stdout.strip() != ""
+
+
+def build_thumbnail_command(input_path: str, timestamp: float, output_path: str, width: int = 160) -> list:
+    """Ekstrak satu frame thumbnail. -ss sebelum -i = fast seek (keyframe terdekat), cukup akurat untuk preview."""
+    return [
+        "ffmpeg", "-y",
+        "-ss", f"{max(timestamp, 0):.3f}",
+        "-i", input_path,
+        "-frames:v", "1",
+        "-vf", f"scale={width}:-2",
+        "-q:v", "4",
+        output_path,
+    ]
+
+
+def build_waveform_command(input_path: str, output_path: str, width: int = 1600, height: int = 120, color: str = "5eb0ef") -> list:
+    return [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-filter_complex", f"aformat=channel_layouts=mono,showwavespic=s={width}x{height}:colors=0x{color}",
+        "-frames:v", "1",
+        output_path,
+    ]
+
+
 def sanitize_filename(name: str) -> str:
     name = name.strip() or "clip"
     name = re.sub(r"[^A-Za-z0-9._\- ]+", "_", name)

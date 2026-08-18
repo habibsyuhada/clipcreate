@@ -9,6 +9,7 @@ const state = {
   mergeMode: false,
   pendingStart: null,
   pendingEnd: null,
+  thumbMeta: null, // {count, thumb_width, thumb_height, interval}
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -214,10 +215,80 @@ async function selectVideo(path) {
     const project = await api(`/api/project?path=${encodeURIComponent(info.path)}`);
     state.clips = (project.clips || []).map((c) => ({ ...c, edits: c.edits || defaultEdits() }));
     renderAll();
+    loadTimelineVisuals();
   } catch (e) {
     alert(`Gagal membuka video: ${e.message}`);
   }
 }
+
+// ---------- Timeline thumbnail sprite & waveform ----------
+
+async function loadTimelineVisuals() {
+  if (!state.videoPath) return;
+  state.thumbMeta = null;
+  loadThumbnails();
+  loadWaveform();
+}
+
+async function loadThumbnails() {
+  const thumbImg = $("#timelineThumbs");
+  thumbImg.classList.add("hidden");
+  try {
+    const meta = await api(`/api/video/thumbnails?path=${encodeURIComponent(state.videoPath)}`);
+    state.thumbMeta = meta;
+    thumbImg.onload = () => thumbImg.classList.remove("hidden");
+    thumbImg.src = `/video/thumbnail-sprite?path=${encodeURIComponent(state.videoPath)}&t=${Date.now()}`;
+  } catch (e) {
+    console.error("Gagal membuat thumbnail timeline", e);
+  }
+}
+
+async function loadWaveform() {
+  const wfImg = $("#timelineWaveform");
+  wfImg.classList.add("hidden");
+  try {
+    const res = await api(`/api/video/waveform?path=${encodeURIComponent(state.videoPath)}`);
+    if (!res.has_audio) return;
+    wfImg.onload = () => wfImg.classList.remove("hidden");
+    wfImg.src = `/video/waveform-image?path=${encodeURIComponent(state.videoPath)}&t=${Date.now()}`;
+  } catch (e) {
+    console.error("Gagal membuat waveform timeline", e);
+  }
+}
+
+const HOVER_THUMB_W = 140;
+const hoverPreview = $("#timelineHoverPreview");
+const hoverThumb = $("#hoverThumb");
+const hoverTimeEl = $("#hoverTime");
+
+$("#timeline").addEventListener("mousemove", (e) => {
+  if (!state.info || !state.info.duration) return;
+  const rect = $("#timeline").getBoundingClientRect();
+  const x = clamp(e.clientX - rect.left, 0, rect.width);
+  const pct = rect.width ? x / rect.width : 0;
+  const t = pct * state.info.duration;
+
+  hoverTimeEl.textContent = formatTime(t);
+  hoverPreview.style.left = `${clamp(x, HOVER_THUMB_W / 2, rect.width - HOVER_THUMB_W / 2)}px`;
+  hoverPreview.classList.remove("hidden");
+
+  const meta = state.thumbMeta;
+  if (meta && meta.count && meta.interval > 0) {
+    const boxH = Math.round(HOVER_THUMB_W * (meta.thumb_height / meta.thumb_width));
+    const idx = clamp(Math.floor(t / meta.interval), 0, meta.count - 1);
+    hoverThumb.style.width = `${HOVER_THUMB_W}px`;
+    hoverThumb.style.height = `${boxH}px`;
+    hoverThumb.style.backgroundImage = `url(/video/thumbnail-sprite?path=${encodeURIComponent(state.videoPath)})`;
+    hoverThumb.style.backgroundSize = `${meta.count * HOVER_THUMB_W}px ${boxH}px`;
+    hoverThumb.style.backgroundPosition = `-${idx * HOVER_THUMB_W}px 0`;
+  } else {
+    hoverThumb.style.backgroundImage = "none";
+  }
+});
+
+$("#timeline").addEventListener("mouseleave", () => {
+  hoverPreview.classList.add("hidden");
+});
 
 // ---------- Player controls ----------
 

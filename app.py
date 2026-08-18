@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from clipper import ffmpeg as ff
 from clipper import jobs
 from clipper import projects
+from clipper import thumbnails as thumbs
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
@@ -205,6 +206,51 @@ def stream_video(path: str, request: Request):
 
     headers = {"Accept-Ranges": "bytes", "Content-Length": str(file_size)}
     return StreamingResponse(_iter_file(full, 0, file_size - 1), headers=headers, media_type=content_type)
+
+
+# ---------- Thumbnail sprite & waveform (untuk timeline) ----------
+
+@app.get("/api/video/thumbnails")
+def video_thumbnails(path: str):
+    full = _require_file(path)
+    if not ff.ffmpeg_available():
+        raise HTTPException(status_code=500, detail="FFmpeg tidak ditemukan di PATH.")
+    try:
+        info = ff.probe_video(full)
+        meta = thumbs.ensure_thumbnails(full, info["duration"])
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return meta
+
+
+@app.get("/video/thumbnail-sprite")
+def thumbnail_sprite(path: str):
+    full = _require_file(path)
+    sprite = thumbs.sprite_path(full)
+    if not os.path.exists(sprite):
+        raise HTTPException(status_code=404, detail="Sprite belum digenerate, panggil /api/video/thumbnails dulu")
+    return FileResponse(sprite, media_type="image/jpeg")
+
+
+@app.get("/api/video/waveform")
+def video_waveform(path: str):
+    full = _require_file(path)
+    if not ff.ffmpeg_available():
+        raise HTTPException(status_code=500, detail="FFmpeg tidak ditemukan di PATH.")
+    try:
+        has_audio = thumbs.ensure_waveform(full)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"has_audio": has_audio}
+
+
+@app.get("/video/waveform-image")
+def waveform_image(path: str):
+    full = _require_file(path)
+    wf = thumbs.waveform_path(full)
+    if not os.path.exists(wf):
+        raise HTTPException(status_code=404, detail="Waveform belum digenerate atau video tidak punya audio")
+    return FileResponse(wf, media_type="image/png")
 
 
 # ---------- Persistence project (daftar clip) ----------

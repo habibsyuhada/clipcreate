@@ -6,7 +6,7 @@ Aplikasi lokal untuk memotong video (mis. hasil download YouTube) menjadi bebera
 
 - Buka video lokal (browser file di server, atau paste path lengkap), player HTML5 dengan seek cepat (HTTP Range).
 - Tandai start/end clip dari posisi playhead atau ketik timestamp manual, banyak clip per video.
-- Timeline visual menampilkan posisi tiap clip, keyboard shortcut `I`/`O`/`Space`/`←`/`→`.
+- Timeline visual dengan thumbnail sprite (preview frame) dan waveform audio di background — memudahkan cari posisi potong presisi. Arahkan mouse ke timeline untuk preview frame (hover scrubbing). Thumbnail & waveform di-cache otomatis (regenerate hanya kalau file video berubah), keyboard shortcut `I`/`O`/`Space`/`←`/`→`.
 - Edit per clip (opsional): crop 9:16 / 1:1 / 16:9 dengan anchor, kecepatan 0.5x–2x, volume/fade/mute audio, teks overlay.
 - Render clip satu-satu atau semua sekaligus, lewat render queue di background (tidak blocking), status `queued → processing → done/error`.
 - Mode potong cepat (`-c copy`) otomatis dipakai jika clip tanpa edit apa pun, mode akurat (re-encode) otomatis dipakai jika ada edit.
@@ -60,7 +60,8 @@ clipcreate/
 ├── clipper/
 │   ├── ffmpeg.py        # Builder perintah FFmpeg (cut, crop, speed, text, audio, concat)
 │   ├── jobs.py           # Render queue & status (background, non-blocking)
-│   └── projects.py       # Load/save daftar clip ke JSON
+│   ├── projects.py       # Load/save daftar clip ke JSON
+│   └── thumbnails.py     # Generate & cache thumbnail sprite + waveform untuk timeline
 ├── static/
 │   ├── index.html
 │   ├── style.css        # Dark mode
@@ -77,3 +78,4 @@ clipcreate/
 - Mode potong cepat (`-c copy`) bisa meleset 1–2 detik di keyframe terdekat — dipakai otomatis hanya jika clip tidak punya edit apa pun.
 - Render jalan berurutan (satu job aktif dalam satu waktu) di worker thread terpisah agar server tetap responsif.
 - Nama file output disanitasi otomatis agar aman untuk filesystem.
+- Thumbnail sprite (JPEG) & waveform (PNG) di-generate via FFmpeg lalu di-cache di folder tersembunyi `.<namavideo>.assets/` di sebelah video; regenerate otomatis kalau ukuran/waktu-modifikasi video berubah.

@@ -4,3 +4,4 @@ venv/
 .venv/
 clips/
 *.clips.json
+*.assets/
