@@ -52,11 +52,46 @@ Jika FFmpeg belum terpasang, aplikasi tetap jalan tapi akan menampilkan peringat
 5. Untuk menggabungkan beberapa clip: klik **Merge Mode**, centang clip yang ingin digabung (urutan mengikuti urutan di daftar — pakai tombol ↑/↓ untuk mengatur ulang), isi nama file, klik **Merge & Render**.
 6. Hasil render ada di folder `clips/` di sebelah file video sumber.
 
+## Desktop App (Windows)
+
+Video Clipper juga bisa dijalankan sebagai aplikasi desktop (jendela native, bukan tab browser) lewat [pywebview](https://pywebview.flowrl.com/), dan di-build jadi satu file `.exe` portable dengan [PyInstaller](https://pyinstaller.org/) — FFmpeg ikut dibundel di dalam exe-nya, jadi tinggal jalankan tanpa instalasi apa pun.
+
+### Cara build (tanpa perlu mesin Windows)
+
+Repo ini sudah ada GitHub Actions workflow (`.github/workflows/build-windows.yml`) yang otomatis:
+1. Download static build FFmpeg untuk Windows.
+2. Build `VideoClipper.exe` pakai PyInstaller di runner `windows-latest`.
+3. Upload hasilnya sebagai artifact (bisa didownload dari tab **Actions** di GitHub setelah run selesai).
+
+Jalankan lewat tab **Actions → Build Windows Desktop App → Run workflow**, atau otomatis terpicu tiap push tag `v*`.
+
+> ⚠️ Build ini memakai FFmpeg static build dari [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) (varian "essentials", lisensi GPL). Kalau exe hasil build ini didistribusikan ke orang lain, pastikan mematuhi ketentuan lisensi GPL FFmpeg (mis. sediakan source code / tautan ke source FFmpeg yang dipakai).
+
+### Build manual di mesin Windows sendiri
+
+```powershell
+pip install -r requirements.txt -r requirements-desktop.txt
+# taruh ffmpeg.exe & ffprobe.exe di vendor\ffmpeg\ (download dari ffmpeg.org atau gyan.dev)
+pyinstaller build_windows.spec
+# hasil: dist\VideoClipper.exe
+```
+
+### Jalan langsung tanpa build (dev/testing, semua OS)
+
+```bash
+pip install -r requirements.txt -r requirements-desktop.txt
+python desktop.py
+```
+
+Ini membuka jendela native yang menjalankan server FastAPI di background pada port lokal acak — tidak perlu buka browser manual. Catatan: logika server/threading sudah diverifikasi lewat automated test di sandbox Linux, tapi lapisan jendela native (WebView2) hanya bisa diverifikasi penuh di mesin Windows asli — jadi coba jalankan `dist\VideoClipper.exe` hasil build sendiri untuk memastikan sebelum didistribusikan.
+
 ## Struktur Project
 
 ```
 clipcreate/
 ├── app.py              # Entry point FastAPI
+├── desktop.py           # Entry point desktop (pywebview + server di background thread)
+├── build_windows.spec   # Config PyInstaller untuk build VideoClipper.exe
 ├── clipper/
 │   ├── ffmpeg.py        # Builder perintah FFmpeg (cut, crop, speed, text, audio, concat)
 │   ├── jobs.py           # Render queue & status (background, non-blocking)
@@ -67,6 +102,7 @@ clipcreate/
 │   ├── style.css        # Dark mode
 │   └── app.js
 ├── requirements.txt
+├── requirements-desktop.txt  # Dependency tambahan untuk desktop app (pywebview, pyinstaller)
 └── README.md
 ```
 
