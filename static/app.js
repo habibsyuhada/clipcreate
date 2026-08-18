@@ -74,9 +74,38 @@ function defaultEdits() {
     crop: "original",
     crop_anchor: "center",
     speed: 1,
-    text: { content: "", position: "bottom", size: 36, color: "#ffffff", outline: "#000000" },
+    texts: [],
     audio: { volume: 100, fade_in: 0, fade_out: 0, mute: false },
+    watermark: { enabled: false, image_path: "", position: "top-right", scale: 20, opacity: 100 },
+    subtitle: { enabled: false, path: "", size: 24 },
   };
+}
+
+const LEGACY_TEXT_POSITION_MAP = { top: "top-center", middle: "middle-center", bottom: "bottom-center" };
+
+// Migrasi format edit lama (single `text`) + isi default field yang belum ada di project tersimpan.
+function normalizeEdits(edits) {
+  const base = defaultEdits();
+  if (!edits) return base;
+  const merged = {
+    ...base,
+    ...edits,
+    audio: { ...base.audio, ...(edits.audio || {}) },
+    watermark: { ...base.watermark, ...(edits.watermark || {}) },
+    subtitle: { ...base.subtitle, ...(edits.subtitle || {}) },
+    texts: Array.isArray(edits.texts) ? edits.texts.map((t) => ({ ...t })) : [],
+  };
+  if (edits.text && edits.text.content && merged.texts.length === 0) {
+    merged.texts = [{
+      content: edits.text.content,
+      position: LEGACY_TEXT_POSITION_MAP[edits.text.position] || edits.text.position || "middle-center",
+      size: edits.text.size || 36,
+      color: edits.text.color || "#ffffff",
+      outline: edits.text.outline || "#000000",
+    }];
+  }
+  delete merged.text;
+  return merged;
 }
 
 function editBadges(edits) {
@@ -85,7 +114,13 @@ function editBadges(edits) {
   if (edits.crop && edits.crop !== "original") badges.push(edits.crop);
   const speed = Number(edits.speed || 1);
   if (Math.abs(speed - 1) > 1e-6) badges.push(`${speed}x`);
-  if (edits.text && edits.text.content) badges.push("teks");
+  const texts = (edits.texts || []).filter((t) => t.content);
+  if (texts.length === 1) badges.push("teks");
+  else if (texts.length > 1) badges.push(`teks x${texts.length}`);
+  const watermark = edits.watermark || {};
+  if (watermark.enabled && watermark.image_path) badges.push("watermark");
+  const subtitle = edits.subtitle || {};
+  if (subtitle.enabled && subtitle.path) badges.push("subtitle");
   const audio = edits.audio || {};
   if (audio.mute) badges.push("mute");
   else if (Number(audio.volume || 100) !== 100) badges.push(`${audio.volume}%`);
@@ -216,7 +251,7 @@ async function selectVideo(path) {
     document.title = `Video Clipper — ${info.filename}`;
 
     const project = await api(`/api/project?path=${encodeURIComponent(info.path)}`);
-    state.clips = (project.clips || []).map((c) => ({ ...c, edits: c.edits || defaultEdits() }));
+    state.clips = (project.clips || []).map((c) => ({ ...c, edits: normalizeEdits(c.edits) }));
     renderAll();
     loadTimelineVisuals();
   } catch (e) {
@@ -592,6 +627,32 @@ function moveClip(id, dir) {
   saveProject();
 }
 
+const textLayerTemplate = $("#textLayerTemplate");
+
+function addTextLayerRow(container, layer) {
+  const node = textLayerTemplate.content.cloneNode(true);
+  const row = node.querySelector(".text-layer-row");
+  row.querySelector(".text-layer-content").value = layer.content || "";
+  row.querySelector(".text-layer-position").value = layer.position || "middle-center";
+  row.querySelector(".text-layer-size").value = layer.size || 36;
+  row.querySelector(".text-layer-color").value = layer.color || "#ffffff";
+  row.querySelector(".text-layer-outline").value = layer.outline || "#000000";
+  row.querySelector(".text-layer-remove-btn").addEventListener("click", () => row.remove());
+  container.appendChild(row);
+}
+
+function readTextLayers(container) {
+  return $$(".text-layer-row", container)
+    .map((row) => ({
+      content: row.querySelector(".text-layer-content").value,
+      position: row.querySelector(".text-layer-position").value,
+      size: Number(row.querySelector(".text-layer-size").value) || 36,
+      color: row.querySelector(".text-layer-color").value,
+      outline: row.querySelector(".text-layer-outline").value,
+    }))
+    .filter((t) => t.content.trim() !== "");
+}
+
 function wireEditPanel(li, clip) {
   const e = clip.edits;
   li.querySelector(".edit-crop").value = e.crop;
@@ -601,32 +662,50 @@ function wireEditPanel(li, clip) {
   li.querySelector(".edit-fadein").value = e.audio.fade_in;
   li.querySelector(".edit-fadeout").value = e.audio.fade_out;
   li.querySelector(".edit-mute").checked = !!e.audio.mute;
-  li.querySelector(".edit-text").value = e.text.content;
-  li.querySelector(".edit-text-pos").value = e.text.position;
-  li.querySelector(".edit-text-size").value = e.text.size;
-  li.querySelector(".edit-text-color").value = e.text.color;
-  li.querySelector(".edit-text-outline").value = e.text.outline;
 
-  li.querySelector(".edit-save-btn").addEventListener("click", () => {
+  const textsList = li.querySelector(".text-layers-list");
+  textsList.innerHTML = "";
+  (e.texts || []).forEach((layer) => addTextLayerRow(textsList, layer));
+  li.querySelector(".text-layer-add-btn").addEventListener("click", () => {
+    addTextLayerRow(textsList, { content: "", position: "middle-center", size: 36, color: "#ffffff", outline: "#000000" });
+  });
+
+  li.querySelector(".edit-watermark-enabled").checked = !!e.watermark.enabled;
+  li.querySelector(".edit-watermark-path").value = e.watermark.image_path || "";
+  li.querySelector(".edit-watermark-position").value = e.watermark.position || "top-right";
+  li.querySelector(".edit-watermark-scale").value = e.watermark.scale;
+  li.querySelector(".edit-watermark-opacity").value = e.watermark.opacity;
+
+  li.querySelector(".edit-subtitle-enabled").checked = !!e.subtitle.enabled;
+  li.querySelector(".edit-subtitle-path").value = e.subtitle.path || "";
+  li.querySelector(".edit-subtitle-size").value = e.subtitle.size;
+
+  li.querySelector(".edit-save-btn").addEventListener("click", async () => {
     clip.edits = {
       crop: li.querySelector(".edit-crop").value,
       crop_anchor: li.querySelector(".edit-anchor").value,
       speed: Number(li.querySelector(".edit-speed").value),
-      text: {
-        content: li.querySelector(".edit-text").value,
-        position: li.querySelector(".edit-text-pos").value,
-        size: Number(li.querySelector(".edit-text-size").value),
-        color: li.querySelector(".edit-text-color").value,
-        outline: li.querySelector(".edit-text-outline").value,
-      },
+      texts: readTextLayers(textsList),
       audio: {
         volume: Number(li.querySelector(".edit-volume").value),
         fade_in: Number(li.querySelector(".edit-fadein").value),
         fade_out: Number(li.querySelector(".edit-fadeout").value),
         mute: li.querySelector(".edit-mute").checked,
       },
+      watermark: {
+        enabled: li.querySelector(".edit-watermark-enabled").checked,
+        image_path: li.querySelector(".edit-watermark-path").value.trim(),
+        position: li.querySelector(".edit-watermark-position").value,
+        scale: Number(li.querySelector(".edit-watermark-scale").value) || 20,
+        opacity: Number(li.querySelector(".edit-watermark-opacity").value),
+      },
+      subtitle: {
+        enabled: li.querySelector(".edit-subtitle-enabled").checked,
+        path: li.querySelector(".edit-subtitle-path").value.trim(),
+        size: Number(li.querySelector(".edit-subtitle-size").value) || 24,
+      },
     };
-    saveProject();
+    await saveProjectNow();
     renderAll();
   });
 }
@@ -639,20 +718,27 @@ function renderAll() {
 // ---------- Persistence ----------
 
 let saveTimer = null;
+
+// Simpan langsung (tanpa debounce) — dipakai sebelum render/merge supaya server selalu
+// pakai edits yang paling baru, bukan versi lama karena masih menunggu debounce selesai.
+async function saveProjectNow() {
+  if (!state.videoPath) return;
+  clearTimeout(saveTimer);
+  try {
+    await api("/api/project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_path: state.videoPath, clips: state.clips }),
+    });
+  } catch (e) {
+    console.error("Gagal menyimpan project", e);
+  }
+}
+
 function saveProject() {
   if (!state.videoPath) return;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      await api("/api/project", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_path: state.videoPath, clips: state.clips }),
-      });
-    } catch (e) {
-      console.error("Gagal menyimpan project", e);
-    }
-  }, 300);
+  saveTimer = setTimeout(saveProjectNow, 300);
 }
 
 // ---------- Render (FFmpeg) ----------
@@ -662,6 +748,7 @@ $("#renderAllBtn").addEventListener("click", () => renderClips(state.clips.map((
 async function renderClips(clipIds) {
   if (!state.videoPath || clipIds.length === 0) return;
   try {
+    await saveProjectNow(); // pastikan edit terbaru (mis. baru saja Simpan Edit) sudah tersimpan sebelum render dipicu
     const res = await api("/api/render", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -703,7 +790,7 @@ function pollJobs(jobIds) {
         clearInterval(interval);
         // refresh dari server untuk sinkron output_path final
         const project = await api(`/api/project?path=${encodeURIComponent(state.videoPath)}`);
-        state.clips = (project.clips || []).map((c) => ({ ...c, edits: c.edits || defaultEdits() }));
+        state.clips = (project.clips || []).map((c) => ({ ...c, edits: normalizeEdits(c.edits) }));
         renderAll();
       }
     } catch (e) {
@@ -741,6 +828,7 @@ $("#mergeGoBtn").addEventListener("click", async () => {
   const statusEl = $("#mergeStatus");
   statusEl.textContent = "Menggabungkan...";
   try {
+    await saveProjectNow(); // pastikan edit/urutan clip terbaru sudah tersimpan sebelum merge dipicu
     const res = await api("/api/merge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

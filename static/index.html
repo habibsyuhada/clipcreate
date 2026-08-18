@@ -161,25 +161,49 @@
           <input type="checkbox" class="edit-mute"> Mute
         </label>
       </div>
+      <div class="edit-section">
+        <div class="edit-section-header">
+          <span>Teks Overlay</span>
+          <button type="button" class="btn small text-layer-add-btn">+ Tambah Teks</button>
+        </div>
+        <div class="text-layers-list"></div>
+      </div>
       <div class="edit-grid">
-        <label class="wide">Teks Overlay
-          <input class="edit-text" placeholder="kosongkan jika tidak perlu teks">
+        <label class="checkbox-label">
+          <input type="checkbox" class="edit-watermark-enabled"> Watermark Gambar
         </label>
-        <label>Posisi Teks
-          <select class="edit-text-pos">
-            <option value="top">Atas</option>
-            <option value="middle">Tengah</option>
-            <option value="bottom" selected>Bawah</option>
+        <label class="wide">Path Gambar (PNG/JPG)
+          <input class="edit-watermark-path text-input" placeholder="path lengkap ke file gambar">
+        </label>
+        <label>Posisi
+          <select class="edit-watermark-position">
+            <option value="top-left">Atas Kiri</option>
+            <option value="top-center">Atas Tengah</option>
+            <option value="top-right" selected>Atas Kanan</option>
+            <option value="middle-left">Tengah Kiri</option>
+            <option value="middle-center">Tengah</option>
+            <option value="middle-right">Tengah Kanan</option>
+            <option value="bottom-left">Bawah Kiri</option>
+            <option value="bottom-center">Bawah Tengah</option>
+            <option value="bottom-right">Bawah Kanan</option>
           </select>
         </label>
+        <label>Skala (% lebar video)
+          <input type="number" class="edit-watermark-scale" min="5" max="100" value="20">
+        </label>
+        <label>Opacity (%)
+          <input type="number" class="edit-watermark-opacity" min="0" max="100" value="100">
+        </label>
+      </div>
+      <div class="edit-grid">
+        <label class="checkbox-label">
+          <input type="checkbox" class="edit-subtitle-enabled"> Burn-in Subtitle (.srt)
+        </label>
+        <label class="wide">Path .srt
+          <input class="edit-subtitle-path text-input" placeholder="path lengkap ke file .srt">
+        </label>
         <label>Ukuran Font
-          <input type="number" class="edit-text-size" min="8" max="200" value="36">
-        </label>
-        <label>Warna Teks
-          <input type="color" class="edit-text-color" value="#ffffff">
-        </label>
-        <label>Warna Outline
-          <input type="color" class="edit-text-outline" value="#000000">
+          <input type="number" class="edit-subtitle-size" min="8" max="80" value="24">
         </label>
       </div>
       <div class="edit-actions">
@@ -187,6 +211,28 @@
       </div>
     </div>
   </li>
+</template>
+
+<!-- Template: satu baris layer teks overlay (dipakai berulang, dinamis) -->
+<template id="textLayerTemplate">
+  <div class="text-layer-row">
+    <input class="text-layer-content text-input" placeholder="isi teks">
+    <select class="text-layer-position">
+      <option value="top-left">Atas Kiri</option>
+      <option value="top-center">Atas Tengah</option>
+      <option value="top-right">Atas Kanan</option>
+      <option value="middle-left">Tengah Kiri</option>
+      <option value="middle-center" selected>Tengah</option>
+      <option value="middle-right">Tengah Kanan</option>
+      <option value="bottom-left">Bawah Kiri</option>
+      <option value="bottom-center">Bawah Tengah</option>
+      <option value="bottom-right">Bawah Kanan</option>
+    </select>
+    <input type="number" class="text-layer-size" min="8" max="200" value="36" title="Ukuran font">
+    <input type="color" class="text-layer-color" value="#ffffff" title="Warna teks">
+    <input type="color" class="text-layer-outline" value="#000000" title="Warna outline">
+    <button type="button" class="btn small danger text-layer-remove-btn">✕</button>
+  </div>
 </template>
 
 <script src="/static/app.js"></script>

@@ -510,6 +510,44 @@ kbd {
   justify-content: flex-end;
 }
 
+.edit-section {
+  margin-bottom: 10px;
+}
+
+.edit-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.text-layers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.text-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+}
+
+.text-layer-row .text-layer-content {
+  flex: 1 1 160px;
+}
+
+.text-layer-row .text-layer-size {
+  width: 64px;
+}
+
 /* Modal */
 
 .modal {
