@@ -10,7 +10,10 @@ const state = {
   pendingStart: null,
   pendingEnd: null,
   thumbMeta: null, // {count, thumb_width, thumb_height, interval}
+  timelineDragging: false,
 };
+
+const MIN_CLIP_DURATION = 0.2;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -261,13 +264,8 @@ const hoverPreview = $("#timelineHoverPreview");
 const hoverThumb = $("#hoverThumb");
 const hoverTimeEl = $("#hoverTime");
 
-$("#timeline").addEventListener("mousemove", (e) => {
-  if (!state.info || !state.info.duration) return;
-  const rect = $("#timeline").getBoundingClientRect();
-  const x = clamp(e.clientX - rect.left, 0, rect.width);
-  const pct = rect.width ? x / rect.width : 0;
-  const t = pct * state.info.duration;
-
+function showHoverPreview(t, rect) {
+  const x = clamp((t / state.info.duration) * rect.width, 0, rect.width);
   hoverTimeEl.textContent = formatTime(t);
   hoverPreview.style.left = `${clamp(x, HOVER_THUMB_W / 2, rect.width - HOVER_THUMB_W / 2)}px`;
   hoverPreview.classList.remove("hidden");
@@ -284,10 +282,22 @@ $("#timeline").addEventListener("mousemove", (e) => {
   } else {
     hoverThumb.style.backgroundImage = "none";
   }
+}
+
+function hideHoverPreview() {
+  hoverPreview.classList.add("hidden");
+}
+
+$("#timeline").addEventListener("mousemove", (e) => {
+  if (!state.info || !state.info.duration || state.timelineDragging) return;
+  const rect = $("#timeline").getBoundingClientRect();
+  const x = clamp(e.clientX - rect.left, 0, rect.width);
+  const t = (rect.width ? x / rect.width : 0) * state.info.duration;
+  showHoverPreview(t, rect);
 });
 
 $("#timeline").addEventListener("mouseleave", () => {
-  hoverPreview.classList.add("hidden");
+  if (!state.timelineDragging) hideHoverPreview();
 });
 
 // ---------- Player controls ----------
@@ -379,6 +389,77 @@ function baseName(filename) {
 
 // ---------- Timeline ----------
 
+function positionSegment(seg, clip, dur) {
+  seg.style.left = `${(clip.start / dur) * 100}%`;
+  seg.style.width = `${Math.max(((clip.end - clip.start) / dur) * 100, 0.3)}%`;
+}
+
+function updateClipTimeLabel(clip) {
+  const li = $(`.clip-item[data-id="${clip.id}"]`);
+  if (li) li.querySelector(".clip-time").textContent = `${formatTime(clip.start)} → ${formatTime(clip.end)}`;
+}
+
+function wireSegmentDrag(seg, handleL, handleR, clip, dur) {
+  let mode = null; // "move" | "left" | "right"
+  let startX = 0;
+  let origStart = 0;
+  let origEnd = 0;
+  let dragged = false;
+
+  function onMove(e) {
+    if (!mode) return;
+    const rect = $("#timeline").getBoundingClientRect();
+    const deltaT = ((e.clientX - startX) / rect.width) * dur;
+    if (Math.abs(e.clientX - startX) > 2) dragged = true;
+
+    if (mode === "left") {
+      clip.start = clamp(origStart + deltaT, 0, clip.end - MIN_CLIP_DURATION);
+    } else if (mode === "right") {
+      clip.end = clamp(origEnd + deltaT, clip.start + MIN_CLIP_DURATION, dur);
+    } else {
+      const length = origEnd - origStart;
+      clip.start = clamp(origStart + deltaT, 0, dur - length);
+      clip.end = clip.start + length;
+    }
+
+    positionSegment(seg, clip, dur);
+    updateClipTimeLabel(clip);
+    showHoverPreview(mode === "left" ? clip.start : clip.end, rect);
+  }
+
+  function onUp() {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    state.timelineDragging = false;
+    hideHoverPreview();
+    if (mode && dragged) {
+      renderClipList();
+      saveProject();
+    }
+    mode = null;
+  }
+
+  function onDown(e, m) {
+    e.preventDefault();
+    e.stopPropagation();
+    mode = m;
+    dragged = false;
+    startX = e.clientX;
+    origStart = clip.start;
+    origEnd = clip.end;
+    state.timelineDragging = true;
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  }
+
+  handleL.addEventListener("pointerdown", (e) => onDown(e, "left"));
+  handleR.addEventListener("pointerdown", (e) => onDown(e, "right"));
+  seg.addEventListener("pointerdown", (e) => onDown(e, "move"));
+  seg.addEventListener("click", () => {
+    if (!dragged) videoEl.currentTime = clip.start;
+  });
+}
+
 function renderTimeline() {
   const container = $("#timelineSegments");
   container.innerHTML = "";
@@ -387,13 +468,20 @@ function renderTimeline() {
   state.clips.forEach((clip, idx) => {
     const seg = document.createElement("div");
     seg.className = "timeline-segment";
-    seg.style.left = `${(clip.start / dur) * 100}%`;
-    seg.style.width = `${Math.max(((clip.end - clip.start) / dur) * 100, 0.3)}%`;
+    seg.dataset.id = clip.id;
+    positionSegment(seg, clip, dur);
     seg.style.background = CLIP_COLORS[idx % CLIP_COLORS.length];
     seg.title = clip.name;
-    seg.addEventListener("click", () => {
-      videoEl.currentTime = clip.start;
-    });
+
+    const handleL = document.createElement("div");
+    handleL.className = "seg-handle seg-handle-left";
+    const handleR = document.createElement("div");
+    handleR.className = "seg-handle seg-handle-right";
+    seg.appendChild(handleL);
+    seg.appendChild(handleR);
+
+    wireSegmentDrag(seg, handleL, handleR, clip, dur);
+
     container.appendChild(seg);
   });
   updatePlayhead();
