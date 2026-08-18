@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Clipper</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>🎬 Video Clipper</h1>
+  <div class="topbar-actions">
+    <span id="ffmpegBadge" class="badge badge-muted">memeriksa ffmpeg...</span>
+    <button id="openBtn" class="btn">Buka Video</button>
+  </div>
+</header>
+
+<main id="app" class="app hidden">
+  <section class="player-section">
+    <div class="video-wrap" id="dropZone">
+      <video id="videoEl" controls></video>
+    </div>
+
+    <div class="player-controls">
+      <button id="playBtn" class="btn small" title="Space">▶ / ⏸</button>
+      <span id="timeDisplay" class="mono">00:00.000 / 00:00.000</span>
+      <label class="speed-label">Kecepatan
+        <select id="speedSelect">
+          <option value="0.5">0.5x</option>
+          <option value="0.75">0.75x</option>
+          <option value="1" selected>1x</option>
+          <option value="1.25">1.25x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2">2x</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="timeline-wrap">
+      <div id="timeline" class="timeline">
+        <div id="timelinePlayhead" class="timeline-playhead"></div>
+        <div id="timelineSegments" class="timeline-segments"></div>
+      </div>
+    </div>
+
+    <div class="mark-controls">
+      <button id="setStartBtn" class="btn small" title="I">Set Start (I)</button>
+      <input id="startInput" class="time-input" placeholder="mm:ss">
+      <button id="setEndBtn" class="btn small" title="O">Set End (O)</button>
+      <input id="endInput" class="time-input" placeholder="mm:ss">
+      <button id="addClipBtn" class="btn primary small">+ Add Clip</button>
+    </div>
+    <p class="hint">Shortcut: <kbd>I</kbd> set start · <kbd>O</kbd> set end · <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> mundur/maju 5 detik</p>
+  </section>
+
+  <section class="clips-section">
+    <div class="clips-header">
+      <h2>Daftar Clip</h2>
+      <div class="clips-actions">
+        <button id="renderAllBtn" class="btn primary small">Render All</button>
+        <button id="mergeModeBtn" class="btn small">Merge Mode</button>
+      </div>
+    </div>
+
+    <div id="mergeBar" class="merge-bar hidden">
+      <input id="mergeName" class="text-input" placeholder="nama file gabungan, mis. final.mp4">
+      <button id="mergeGoBtn" class="btn primary small">Merge & Render</button>
+      <span id="mergeStatus" class="mono small-text"></span>
+    </div>
+
+    <ul id="clipList" class="clip-list"></ul>
+  </section>
+</main>
+
+<!-- Modal: file browser -->
+<div id="browseModal" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Pilih Video</h3>
+      <button id="browseCloseBtn" class="btn small">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="browse-path">
+        <button id="browseUpBtn" class="btn small">⬆ Naik</button>
+        <input id="browsePathInput" class="text-input" placeholder="ketik/paste path lengkap lalu Enter">
+      </div>
+      <ul id="browseList" class="browse-list"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- Template: item clip -->
+<template id="clipItemTemplate">
+  <li class="clip-item" data-id="">
+    <div class="clip-row">
+      <input type="checkbox" class="clip-merge-check hidden">
+      <span class="clip-color-dot"></span>
+      <input class="clip-name-input text-input" />
+      <span class="clip-time mono"></span>
+      <span class="clip-badges"></span>
+      <span class="clip-status badge badge-muted">idle</span>
+      <button class="btn small clip-move-up-btn" title="Naikkan urutan">↑</button>
+      <button class="btn small clip-move-down-btn" title="Turunkan urutan">↓</button>
+      <button class="btn small clip-preview-btn">Preview</button>
+      <button class="btn small clip-edit-btn">Edit</button>
+      <button class="btn small clip-render-btn">Render</button>
+      <button class="btn small danger clip-delete-btn">Hapus</button>
+    </div>
+    <div class="clip-error"></div>
+    <div class="clip-edit-panel hidden">
+      <div class="edit-grid">
+        <label>Crop
+          <select class="edit-crop">
+            <option value="original">Original</option>
+            <option value="9:16">9:16 (Shorts)</option>
+            <option value="1:1">1:1</option>
+            <option value="16:9">16:9</option>
+          </select>
+        </label>
+        <label>Anchor Crop
+          <select class="edit-anchor">
+            <option value="left">Kiri</option>
+            <option value="center" selected>Tengah</option>
+            <option value="right">Kanan</option>
+          </select>
+        </label>
+        <label>Kecepatan
+          <select class="edit-speed">
+            <option value="0.5">0.5x</option>
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2x</option>
+          </select>
+        </label>
+        <label>Volume (%)
+          <input type="number" class="edit-volume" min="0" max="200" value="100">
+        </label>
+        <label>Fade In (detik)
+          <input type="number" class="edit-fadein" min="0" step="0.1" value="0">
+        </label>
+        <label>Fade Out (detik)
+          <input type="number" class="edit-fadeout" min="0" step="0.1" value="0">
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" class="edit-mute"> Mute
+        </label>
+      </div>
+      <div class="edit-grid">
+        <label class="wide">Teks Overlay
+          <input class="edit-text" placeholder="kosongkan jika tidak perlu teks">
+        </label>
+        <label>Posisi Teks
+          <select class="edit-text-pos">
+            <option value="top">Atas</option>
+            <option value="middle">Tengah</option>
+            <option value="bottom" selected>Bawah</option>
+          </select>
+        </label>
+        <label>Ukuran Font
+          <input type="number" class="edit-text-size" min="8" max="200" value="36">
+        </label>
+        <label>Warna Teks
+          <input type="color" class="edit-text-color" value="#ffffff">
+        </label>
+        <label>Warna Outline
+          <input type="color" class="edit-text-outline" value="#000000">
+        </label>
+      </div>
+      <div class="edit-actions">
+        <button class="btn small primary edit-save-btn">Simpan Edit</button>
+      </div>
+    </div>
+  </li>
+</template>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
