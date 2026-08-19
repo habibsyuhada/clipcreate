@@ -4,3 +4,6 @@ venv/
 .venv/
 clips/
 *.clips.json
+build/
+dist/
+*.zip
