@@ -1,3 +1,4 @@
--r requirements.txt
-pywebview>=5.1
-pyinstaller>=6.6
+# Dependency tambahan untuk menjalankan/build versi desktop (lihat README "Desktop App").
+# Install: pip install -r requirements.txt -r requirements-desktop.txt
+pywebview>=5.0
+pyinstaller>=6.0

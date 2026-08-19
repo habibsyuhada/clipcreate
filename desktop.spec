@@ -1,6 +1,8 @@
-# PyInstaller spec — build standalone desktop executable.
+# PyInstaller spec — build standalone desktop executable untuk macOS/Linux.
+# (Windows pakai build_windows.spec, yang juga membundel ffmpeg.exe/ffprobe.exe.)
 # Build: pyinstaller desktop.spec
 # Hasil ada di dist/VideoClipper/ (satu folder, berisi executable + dependencies).
+# FFmpeg tidak dibundel di sini — harus terinstall terpisah di sistem (lihat README).
 
 a = Analysis(
     ["desktop.py"],
@@ -12,6 +14,7 @@ a = Analysis(
         "clipper.ffmpeg",
         "clipper.jobs",
         "clipper.projects",
+        "clipper.thumbnails",
         "uvicorn.logging",
         "uvicorn.loops.auto",
         "uvicorn.protocols.http.auto",

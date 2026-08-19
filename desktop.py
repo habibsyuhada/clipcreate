@@ -1,44 +1,83 @@
-"""Video Clipper — desktop entry point. Membungkus app.py FastAPI dalam window native (pywebview).
+"""Entry point desktop (Windows/macOS/Linux) — bungkus Video Clipper jadi jendela native
+pakai pywebview, server FastAPI jalan di background thread di port lokal acak.
 
-Dipakai untuk build standalone executable (lihat desktop.spec / .github/workflows/release.yml).
-Tetap bisa dijalankan langsung: python desktop.py
+Jalankan langsung: python desktop.py
+Build jadi satu file .exe (Windows, FFmpeg ikut dibundel): lihat build_windows.spec.
+Build untuk macOS/Linux: lihat desktop.spec.
+Lihat README bagian "Desktop App" untuk detail.
 """
 
+import os
 import socket
+import sys
 import threading
 import time
 
 import uvicorn
-import webview
-
-from app import app
-from clipper import ffmpeg as ff
 
 
-def _free_port() -> int:
+def bundled_dir() -> str | None:
+    """Kalau jalan sebagai exe hasil PyInstaller (onefile), return folder ekstraksi sementara
+    tempat ffmpeg(.exe)/ffprobe(.exe) & static/ ikut dibundel. None kalau jalan sebagai skrip biasa."""
+    if getattr(sys, "frozen", False):
+        return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    return None
+
+
+def prepare_ffmpeg_path() -> None:
+    """Supaya shutil.which("ffmpeg") nemu binary yang dibundel PyInstaller (kalau ada)."""
+    bundled = bundled_dir()
+    if bundled:
+        os.environ["PATH"] = bundled + os.pathsep + os.environ.get("PATH", "")
+
+
+def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
-def _run_server(port: int) -> None:
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+def start_server(port: int) -> threading.Thread:
+    from app import app  # import setelah prepare_ffmpeg_path() supaya PATH sudah benar
+
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    server = uvicorn.Server(config)
+
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    return thread
+
+
+def wait_until_ready(port: int, timeout: float = 10.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.1)
+    return False
 
 
 def main() -> None:
-    if not ff.ffmpeg_available():
-        webview.settings["ALLOW_DOWNLOADS"] = False
+    prepare_ffmpeg_path()
+    port = free_port()
+    start_server(port)
 
-    port = _free_port()
-    thread = threading.Thread(target=_run_server, args=(port,), daemon=True)
-    thread.start()
+    if not wait_until_ready(port):
+        print(f"Server tidak merespons di port {port} setelah beberapa detik.")
+        sys.exit(1)
 
-    window_title = "Video Clipper"
-    if not ff.ffmpeg_available():
-        window_title += " (FFmpeg tidak ditemukan — install FFmpeg agar render berfungsi)"
+    import webview
 
     url = f"http://127.0.0.1:{port}"
-    webview.create_window(window_title, url, width=1280, height=800, min_size=(960, 600))
+    webview.create_window(
+        "Video Clipper",
+        url,
+        width=1280,
+        height=860,
+        min_size=(960, 640),
+    )
     try:
         webview.start()
     except Exception:

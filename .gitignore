@@ -4,6 +4,10 @@ venv/
 .venv/
 clips/
 *.clips.json
+*.assets/
+
+# Build desktop (PyInstaller)
 build/
 dist/
+vendor/
 *.zip

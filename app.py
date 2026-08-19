@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from clipper import ffmpeg as ff
 from clipper import jobs
 from clipper import projects
+from clipper import thumbnails as thumbs
 
 APP_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(APP_DIR, "static")
@@ -40,12 +41,18 @@ class MergePayload(BaseModel):
     video_path: str
     clip_ids: list
     output_name: str
+    transition: str | None = None  # None/"none" | "fade" | "dissolve"
+    transition_duration: float | None = None  # detik, default 0.5
 
 
 # ---------- Helper ----------
 
 def _abspath(path: str) -> str:
     return os.path.abspath(os.path.expanduser(path))
+
+
+def clamp_number(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
 
 
 def _require_file(path: str) -> str:
@@ -207,6 +214,51 @@ def stream_video(path: str, request: Request):
     return StreamingResponse(_iter_file(full, 0, file_size - 1), headers=headers, media_type=content_type)
 
 
+# ---------- Thumbnail sprite & waveform (untuk timeline) ----------
+
+@app.get("/api/video/thumbnails")
+def video_thumbnails(path: str):
+    full = _require_file(path)
+    if not ff.ffmpeg_available():
+        raise HTTPException(status_code=500, detail="FFmpeg tidak ditemukan di PATH.")
+    try:
+        info = ff.probe_video(full)
+        meta = thumbs.ensure_thumbnails(full, info["duration"])
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return meta
+
+
+@app.get("/video/thumbnail-sprite")
+def thumbnail_sprite(path: str):
+    full = _require_file(path)
+    sprite = thumbs.sprite_path(full)
+    if not os.path.exists(sprite):
+        raise HTTPException(status_code=404, detail="Sprite belum digenerate, panggil /api/video/thumbnails dulu")
+    return FileResponse(sprite, media_type="image/jpeg")
+
+
+@app.get("/api/video/waveform")
+def video_waveform(path: str):
+    full = _require_file(path)
+    if not ff.ffmpeg_available():
+        raise HTTPException(status_code=500, detail="FFmpeg tidak ditemukan di PATH.")
+    try:
+        has_audio = thumbs.ensure_waveform(full)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"has_audio": has_audio}
+
+
+@app.get("/video/waveform-image")
+def waveform_image(path: str):
+    full = _require_file(path)
+    wf = thumbs.waveform_path(full)
+    if not os.path.exists(wf):
+        raise HTTPException(status_code=404, detail="Waveform belum digenerate atau video tidak punya audio")
+    return FileResponse(wf, media_type="image/png")
+
+
 # ---------- Persistence project (daftar clip) ----------
 
 @app.get("/api/project")
@@ -314,10 +366,16 @@ def merge(payload: MergePayload):
     target_h = info["height"]
     target_fps = 30
 
+    transition = payload.transition if payload.transition in ff.TRANSITIONS else "none"
+    trans_duration = clamp_number(payload.transition_duration or 0.5, 0.1, 3.0)
+
+    job_meta = {"video_path": video_path, "output_path": final_output, "kind": "merge"}
+
     def fn():
         os.makedirs(tmp_dir, exist_ok=True)
-        normalized_paths = []
         try:
+            normalized_paths = []
+            durations = []
             for idx, clip in enumerate(ordered_clips):
                 mode = "reencode"  # merge selalu re-encode agar bisa dinormalisasi
                 raw_path = os.path.join(tmp_dir, f"part_{idx}_raw.mp4")
@@ -333,23 +391,44 @@ def merge(payload: MergePayload):
                 )
                 jobs.run_ffmpeg(cmd)
 
+                has_audio = ff.has_audio_stream(raw_path)
                 norm_path = os.path.join(tmp_dir, f"part_{idx}_norm.mp4")
-                norm_cmd = ff.build_normalize_command(raw_path, norm_path, target_w, target_h, target_fps)
+                norm_cmd = ff.build_normalize_command(
+                    raw_path, norm_path, target_w, target_h, target_fps, has_audio=has_audio
+                )
                 jobs.run_ffmpeg(norm_cmd)
                 normalized_paths.append(norm_path)
+                durations.append(ff.probe_video(norm_path)["duration"])
 
-            list_file = os.path.join(tmp_dir, "list.txt")
-            with open(list_file, "w", encoding="utf-8") as f:
-                for p in normalized_paths:
-                    f.write(f"file '{p}'\n")
+            actual_transition = transition
+            actual_duration = trans_duration
+            if actual_transition != "none":
+                max_safe_duration = min(durations) / 2 - 0.05
+                if max_safe_duration < 0.1:
+                    actual_transition = "none"
+                    job_meta["warning"] = (
+                        "Transisi dinonaktifkan otomatis: ada clip yang terlalu pendek untuk durasi transisi."
+                    )
+                elif actual_duration > max_safe_duration:
+                    actual_duration = max_safe_duration
 
-            concat_cmd = ff.build_concat_command(list_file, final_output)
-            jobs.run_ffmpeg(concat_cmd)
+            if actual_transition == "none":
+                list_file = os.path.join(tmp_dir, "list.txt")
+                with open(list_file, "w", encoding="utf-8") as f:
+                    for p in normalized_paths:
+                        f.write(f"file '{p}'\n")
+                jobs.run_ffmpeg(ff.build_concat_command(list_file, final_output))
+            else:
+                jobs.run_ffmpeg(
+                    ff.build_transition_merge_command(
+                        normalized_paths, durations, final_output, actual_transition, actual_duration
+                    )
+                )
         finally:
             import shutil
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    job_id = jobs.submit_job(fn, meta={"video_path": video_path, "output_path": final_output, "kind": "merge"})
+    job_id = jobs.submit_job(fn, meta=job_meta)
     return {"job_id": job_id, "output_path": final_output}
 
 
