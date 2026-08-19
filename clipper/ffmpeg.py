@@ -191,6 +191,9 @@ def needs_reencode(edits: dict) -> bool:
     punch = edits.get("punch") or {}
     if punch.get("enabled") and punch.get("type") in PUNCH_TYPES:
         return True
+    sound_effect = edits.get("sound_effect") or {}
+    if sound_effect.get("enabled") and sound_effect.get("audio_path"):
+        return True
     audio = edits.get("audio") or {}
     if audio.get("mute"):
         return True
@@ -368,15 +371,33 @@ def build_cut_command(
     watermark = edits.get("watermark") or {}
     watermark_path = watermark.get("image_path") if watermark.get("enabled") else None
 
+    sound_effect = edits.get("sound_effect") or {}
+    sfx_path = sound_effect.get("audio_path") if sound_effect.get("enabled") else None
+
     # re-encode (akurat): -ss setelah -i agar frame-accurate
     cmd = ["ffmpeg", "-y", "-i", input_path]
+    next_input_idx = 1
+    watermark_idx = None
+    sfx_idx = None
     if watermark_path:
         cmd += ["-loop", "1", "-i", watermark_path]
+        watermark_idx = next_input_idx
+        next_input_idx += 1
+    if sfx_path:
+        # -itsoffset menggeser PTS file sfx (jam sendiri, mulai dari 0) supaya sejajar dengan
+        # jam absolut input utama (yang tetap dipertahankan karena -ss dipasang sebagai output
+        # option demi frame-accuracy) — tanpa ini, filter -ss/-t global di bawah akan salah
+        # memotong/membuang audio efek karena PTS-nya tidak nyambung dengan window clip.
+        cmd += ["-itsoffset", f"{start:.3f}", "-i", sfx_path]
+        sfx_idx = next_input_idx
+        next_input_idx += 1
     cmd += ["-ss", f"{start:.3f}", "-t", f"{duration:.3f}"]
 
     video_filters = build_video_filters(edits, width, height, clip_start=start)
     audio_filters = build_audio_filters(edits, duration)
 
+    complex_parts = []
+    video_label = None
     if watermark_path:
         wm_scale_pct = _clamp(float(watermark.get("scale", 20) or 20), 5, 100)
         wm_opacity = _clamp(float(watermark.get("opacity", 100) or 100), 0, 100) / 100
@@ -384,19 +405,41 @@ def build_cut_command(
         x_expr, y_expr = _overlay_xy(watermark.get("position", "top-right"))
 
         base_chain = ",".join(video_filters) if video_filters else "null"
-        filter_complex = (
-            f"[0:v]{base_chain}[base];"
-            f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={wm_opacity:.3f}[wm];"
-            f"[base][wm]overlay={x_expr}:{y_expr}:shortest=1[vout]"
-        )
-        cmd += ["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"]
-    else:
-        if video_filters:
-            cmd += ["-vf", ",".join(video_filters)]
+        complex_parts.append(f"[0:v]{base_chain}[base]")
+        complex_parts.append(f"[{watermark_idx}:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={wm_opacity:.3f}[wm]")
+        complex_parts.append(f"[base][wm]overlay={x_expr}:{y_expr}:shortest=1[vout]")
+        video_label = "[vout]"
+    elif video_filters:
+        cmd += ["-vf", ",".join(video_filters)]
+
+    audio_label = None
+    if sfx_idx is not None:
+        # Efek suara: audio kedua yang ditunda (adelay) ke titik waktu tertentu di clip,
+        # lalu di-mix dengan audio asli (kalau audio asli tidak di-mute).
+        delay_ms = int(round(max(float(sound_effect.get("time", 0) or 0), 0) * 1000))
+        effect_volume = _clamp(float(sound_effect.get("volume", 100) or 100), 0, 300) / 100
+        complex_parts.append(f"[{sfx_idx}:a]adelay={delay_ms}|{delay_ms}:all=1,volume={effect_volume:.3f}[sfx]")
+
+        if audio_filters is None:
+            audio_label = "[sfx]"
+        else:
+            main_chain = ",".join(audio_filters) if audio_filters else None
+            main_label = "[a0]" if main_chain else "[0:a]"
+            if main_chain:
+                complex_parts.append(f"[0:a]{main_chain}[a0]")
+            complex_parts.append(f"{main_label}[sfx]amix=inputs=2:duration=first:dropout_transition=0[aout]")
+            audio_label = "[aout]"
+
+    if complex_parts:
+        cmd += ["-filter_complex", ";".join(complex_parts)]
+        cmd += ["-map", video_label or "0:v"]
+        cmd += ["-map", audio_label or "0:a?"]
 
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
 
-    if audio_filters is None:
+    if audio_label is not None:
+        cmd += ["-c:a", "aac"]
+    elif audio_filters is None:
         cmd += ["-an"]
     else:
         if audio_filters:

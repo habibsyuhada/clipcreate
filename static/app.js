@@ -80,6 +80,7 @@ function defaultEdits() {
     subtitle: { enabled: false, path: "", size: 24 },
     meme_filter: "none",
     punch: { enabled: false, type: "zoom", time: 0.5, duration: 0.3, intensity: 25 },
+    sound_effect: { enabled: false, audio_path: "", time: 0.5, volume: 100 },
   };
 }
 
@@ -98,6 +99,7 @@ function normalizeEdits(edits) {
     watermark: { ...base.watermark, ...(edits.watermark || {}) },
     subtitle: { ...base.subtitle, ...(edits.subtitle || {}) },
     punch: { ...base.punch, ...(edits.punch || {}) },
+    sound_effect: { ...base.sound_effect, ...(edits.sound_effect || {}) },
     texts: Array.isArray(edits.texts) ? edits.texts.map((t) => ({ ...t })) : [],
   };
   if (edits.text && edits.text.content && merged.texts.length === 0) {
@@ -133,6 +135,8 @@ function editBadges(edits) {
   if (edits.meme_filter && edits.meme_filter !== "none") badges.push(edits.meme_filter);
   const punch = edits.punch || {};
   if (punch.enabled) badges.push(`${punch.type} punch`);
+  const sfx = edits.sound_effect || {};
+  if (sfx.enabled && sfx.audio_path) badges.push("sfx");
   return badges;
 }
 
@@ -694,6 +698,11 @@ function wireEditPanel(li, clip) {
     li.querySelector(".edit-punch-intensity").value = PUNCH_DEFAULT_INTENSITY[ev.target.value] ?? 25;
   });
 
+  li.querySelector(".edit-sfx-enabled").checked = !!e.sound_effect.enabled;
+  li.querySelector(".edit-sfx-path").value = e.sound_effect.audio_path || "";
+  li.querySelector(".edit-sfx-time").value = e.sound_effect.time;
+  li.querySelector(".edit-sfx-volume").value = e.sound_effect.volume;
+
   li.querySelector(".edit-watermark-enabled").checked = !!e.watermark.enabled;
   li.querySelector(".edit-watermark-path").value = e.watermark.image_path || "";
   li.querySelector(".edit-watermark-position").value = e.watermark.position || "top-right";
@@ -735,6 +744,12 @@ function wireEditPanel(li, clip) {
         time: Number(li.querySelector(".edit-punch-time").value) || 0,
         duration: Number(li.querySelector(".edit-punch-duration").value) || 0.3,
         intensity: Number(li.querySelector(".edit-punch-intensity").value) || 25,
+      },
+      sound_effect: {
+        enabled: li.querySelector(".edit-sfx-enabled").checked,
+        audio_path: li.querySelector(".edit-sfx-path").value.trim(),
+        time: Number(li.querySelector(".edit-sfx-time").value) || 0,
+        volume: Number(li.querySelector(".edit-sfx-volume").value) || 100,
       },
     };
     await saveProjectNow();
