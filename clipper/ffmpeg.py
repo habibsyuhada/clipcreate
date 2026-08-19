@@ -98,6 +98,66 @@ def escape_filter_path(path: str) -> str:
     return path
 
 
+MEME_FILTERS = {
+    "none": [],
+    "deepfry": ["eq=contrast=1.6:saturation=2.8:gamma=1.3", "noise=alls=25:allf=t+u", "unsharp=5:5:1.5"],
+    "vhs": ["hue=s=0.6", "noise=alls=15:allf=t", "chromashift=cbh=2:crh=-2"],
+    "grayscale": ["hue=s=0"],
+}
+
+PUNCH_TYPES = {"zoom", "shake", "flash"}
+
+
+def _meme_filter_chain(name: str) -> list:
+    return list(MEME_FILTERS.get(name or "none", []))
+
+
+def _punch_filters(punch: dict, width: int, height: int, clip_start: float = 0.0) -> list:
+    """Efek 'punch' sesaat (zoom-in, shake, atau flash) di titik waktu tertentu pada clip.
+
+    `t` di dalam ekspresi filter ffmpeg adalah timestamp absolut video sumber (bukan relatif
+    ke awal clip, sudah diverifikasi karena -ss dipasang sebagai output option), jadi waktu
+    yang diminta user (relatif ke awal clip) harus ditambah `clip_start` di sini.
+    """
+    if not punch or not punch.get("enabled"):
+        return []
+    ptype = punch.get("type", "zoom")
+    if ptype not in PUNCH_TYPES:
+        return []
+    time_at = clip_start + max(float(punch.get("time", 0) or 0), 0)
+    duration = _clamp(float(punch.get("duration", 0.3) or 0.3), 0.05, 5.0)
+    half = duration / 2
+    end_at = time_at + duration
+
+    if ptype == "zoom":
+        intensity = _clamp(float(punch.get("intensity", 25) or 25), 1, 200) / 100
+        zoom_expr = f"(1+({intensity:.4f})*max(0,1-abs(t-{time_at:.3f})/{half:.3f}))"
+        return [
+            f"scale=w='trunc(iw*{zoom_expr}/2)*2':h='trunc(ih*{zoom_expr}/2)*2':eval=frame",
+            f"crop=w={width}:h={height}:x='(in_w-out_w)/2':y='(in_h-out_h)/2'",
+        ]
+
+    if ptype == "shake":
+        amp = int(_clamp(float(punch.get("intensity", 16) or 16), 2, 60))
+        sx = (
+            f"{amp}+{amp}*if(between(t\\,{time_at:.3f}\\,{end_at:.3f})\\,1\\,0)"
+            f"*sin(2*PI*16*(t-{time_at:.3f}))"
+        )
+        sy = (
+            f"{amp}+{amp}*if(between(t\\,{time_at:.3f}\\,{end_at:.3f})\\,1\\,0)"
+            f"*cos(2*PI*21*(t-{time_at:.3f}))"
+        )
+        return [
+            f"scale=w=iw+{amp * 2}:h=ih+{amp * 2}",
+            f"crop=w={width}:h={height}:x='{sx}':y='{sy}'",
+        ]
+
+    # flash
+    strength = _clamp(float(punch.get("intensity", 80) or 80), 5, 100) / 100
+    expr = f"{strength:.3f}*max(0,1-abs(t-{time_at:.3f})/{half:.3f})"
+    return [f"eq=brightness='{expr}':eval=frame"]
+
+
 def _all_text_layers(edits: dict) -> list:
     """Gabungkan `texts` (list layer baru) dengan `text` singular (format lama, untuk backward compat)."""
     texts = list(edits.get("texts") or [])
@@ -124,6 +184,12 @@ def needs_reencode(edits: dict) -> bool:
         return True
     subtitle = edits.get("subtitle") or {}
     if subtitle.get("enabled") and subtitle.get("path"):
+        return True
+    meme_filter = edits.get("meme_filter", "none")
+    if meme_filter and meme_filter != "none":
+        return True
+    punch = edits.get("punch") or {}
+    if punch.get("enabled") and punch.get("type") in PUNCH_TYPES:
         return True
     audio = edits.get("audio") or {}
     if audio.get("mute"):
@@ -153,7 +219,7 @@ def _atempo_chain(speed: float) -> list:
     return filters
 
 
-def _crop_filter(crop: str, anchor: str, width: int, height: int) -> str | None:
+def _crop_dims(crop: str, anchor: str, width: int, height: int) -> tuple | None:
     ratio = CROP_RATIOS.get(crop)
     if ratio is None:
         return None
@@ -173,7 +239,6 @@ def _crop_filter(crop: str, anchor: str, width: int, height: int) -> str | None:
         else:
             x = (width - crop_w) // 2
         y = 0
-        return f"crop={crop_w}:{crop_h}:{x}:{y}"
     else:
         # sumber lebih sempit dari target -> crop tinggi
         crop_w = width
@@ -181,7 +246,7 @@ def _crop_filter(crop: str, anchor: str, width: int, height: int) -> str | None:
         crop_h -= crop_h % 2
         x = 0
         y = (height - crop_h) // 2
-        return f"crop={crop_w}:{crop_h}:{x}:{y}"
+    return crop_w, crop_h, x, y
 
 
 def _text_filter(text_cfg: dict) -> str | None:
@@ -196,11 +261,15 @@ def _text_filter(text_cfg: dict) -> str | None:
     size = int(text_cfg.get("size", 36) or 36)
     color = text_cfg.get("color", "white") or "white"
     outline = text_cfg.get("outline", "black") or "black"
+    meme = bool(text_cfg.get("meme"))
+    if meme:
+        content = content.upper()
+    borderw = max(4, size // 8) if meme else 2
 
     escaped = escape_drawtext(content)
     return (
         f"drawtext=text='{escaped}':fontcolor={color}:fontsize={size}:"
-        f"borderw=2:bordercolor={outline}:x={x_expr}:y={y_expr}"
+        f"borderw={borderw}:bordercolor={outline}:x={x_expr}:y={y_expr}"
     )
 
 
@@ -212,15 +281,21 @@ def _subtitle_filter(sub_cfg: dict) -> str | None:
     return f"subtitles=filename='{path}':force_style='FontSize={size}'"
 
 
-def build_video_filters(edits: dict, width: int, height: int) -> list:
+def build_video_filters(edits: dict, width: int, height: int, clip_start: float = 0.0) -> list:
     filters = []
+    cur_w, cur_h = width, height
     crop = edits.get("crop", "original")
     anchor = edits.get("crop_anchor", "center")
     if anchor not in CROP_ANCHORS:
         anchor = "center"
-    crop_f = _crop_filter(crop, anchor, width, height)
-    if crop_f:
-        filters.append(crop_f)
+    dims = _crop_dims(crop, anchor, width, height)
+    if dims:
+        crop_w, crop_h, x, y = dims
+        filters.append(f"crop={crop_w}:{crop_h}:{x}:{y}")
+        cur_w, cur_h = crop_w, crop_h
+
+    filters.extend(_meme_filter_chain(edits.get("meme_filter", "none")))
+    filters.extend(_punch_filters(edits.get("punch") or {}, cur_w, cur_h, clip_start))
 
     for text_cfg in _all_text_layers(edits):
         text_f = _text_filter(text_cfg)
@@ -299,7 +374,7 @@ def build_cut_command(
         cmd += ["-loop", "1", "-i", watermark_path]
     cmd += ["-ss", f"{start:.3f}", "-t", f"{duration:.3f}"]
 
-    video_filters = build_video_filters(edits, width, height)
+    video_filters = build_video_filters(edits, width, height, clip_start=start)
     audio_filters = build_audio_filters(edits, duration)
 
     if watermark_path:
