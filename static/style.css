@@ -518,9 +518,26 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 6px;
+}
+
+.edit-section-header-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.text-layer-meme-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .text-layers-list {

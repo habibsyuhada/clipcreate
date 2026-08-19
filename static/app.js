@@ -78,8 +78,13 @@ function defaultEdits() {
     audio: { volume: 100, fade_in: 0, fade_out: 0, mute: false },
     watermark: { enabled: false, image_path: "", position: "top-right", scale: 20, opacity: 100 },
     subtitle: { enabled: false, path: "", size: 24 },
+    meme_filter: "none",
+    punch: { enabled: false, type: "zoom", time: 0.5, duration: 0.3, intensity: 25 },
+    sound_effect: { enabled: false, audio_path: "", time: 0.5, volume: 100 },
   };
 }
+
+const PUNCH_DEFAULT_INTENSITY = { zoom: 25, shake: 16, flash: 80 };
 
 const LEGACY_TEXT_POSITION_MAP = { top: "top-center", middle: "middle-center", bottom: "bottom-center" };
 
@@ -93,6 +98,8 @@ function normalizeEdits(edits) {
     audio: { ...base.audio, ...(edits.audio || {}) },
     watermark: { ...base.watermark, ...(edits.watermark || {}) },
     subtitle: { ...base.subtitle, ...(edits.subtitle || {}) },
+    punch: { ...base.punch, ...(edits.punch || {}) },
+    sound_effect: { ...base.sound_effect, ...(edits.sound_effect || {}) },
     texts: Array.isArray(edits.texts) ? edits.texts.map((t) => ({ ...t })) : [],
   };
   if (edits.text && edits.text.content && merged.texts.length === 0) {
@@ -115,7 +122,7 @@ function editBadges(edits) {
   const speed = Number(edits.speed || 1);
   if (Math.abs(speed - 1) > 1e-6) badges.push(`${speed}x`);
   const texts = (edits.texts || []).filter((t) => t.content);
-  if (texts.length === 1) badges.push("teks");
+  if (texts.length === 1) badges.push(texts[0].meme ? "teks meme" : "teks");
   else if (texts.length > 1) badges.push(`teks x${texts.length}`);
   const watermark = edits.watermark || {};
   if (watermark.enabled && watermark.image_path) badges.push("watermark");
@@ -125,6 +132,11 @@ function editBadges(edits) {
   if (audio.mute) badges.push("mute");
   else if (Number(audio.volume || 100) !== 100) badges.push(`${audio.volume}%`);
   if (Number(audio.fade_in || 0) > 0 || Number(audio.fade_out || 0) > 0) badges.push("fade");
+  if (edits.meme_filter && edits.meme_filter !== "none") badges.push(edits.meme_filter);
+  const punch = edits.punch || {};
+  if (punch.enabled) badges.push(`${punch.type} punch`);
+  const sfx = edits.sound_effect || {};
+  if (sfx.enabled && sfx.audio_path) badges.push("sfx");
   return badges;
 }
 
@@ -637,6 +649,7 @@ function addTextLayerRow(container, layer) {
   row.querySelector(".text-layer-size").value = layer.size || 36;
   row.querySelector(".text-layer-color").value = layer.color || "#ffffff";
   row.querySelector(".text-layer-outline").value = layer.outline || "#000000";
+  row.querySelector(".text-layer-meme").checked = !!layer.meme;
   row.querySelector(".text-layer-remove-btn").addEventListener("click", () => row.remove());
   container.appendChild(row);
 }
@@ -649,6 +662,7 @@ function readTextLayers(container) {
       size: Number(row.querySelector(".text-layer-size").value) || 36,
       color: row.querySelector(".text-layer-color").value,
       outline: row.querySelector(".text-layer-outline").value,
+      meme: row.querySelector(".text-layer-meme").checked,
     }))
     .filter((t) => t.content.trim() !== "");
 }
@@ -667,8 +681,27 @@ function wireEditPanel(li, clip) {
   textsList.innerHTML = "";
   (e.texts || []).forEach((layer) => addTextLayerRow(textsList, layer));
   li.querySelector(".text-layer-add-btn").addEventListener("click", () => {
-    addTextLayerRow(textsList, { content: "", position: "middle-center", size: 36, color: "#ffffff", outline: "#000000" });
+    addTextLayerRow(textsList, { content: "", position: "middle-center", size: 36, color: "#ffffff", outline: "#000000", meme: false });
   });
+  li.querySelector(".text-layer-meme-add-btn").addEventListener("click", () => {
+    addTextLayerRow(textsList, { content: "teks atas", position: "top-center", size: 48, color: "#ffffff", outline: "#000000", meme: true });
+    addTextLayerRow(textsList, { content: "teks bawah", position: "bottom-center", size: 48, color: "#ffffff", outline: "#000000", meme: true });
+  });
+
+  li.querySelector(".edit-meme-filter").value = e.meme_filter || "none";
+  li.querySelector(".edit-punch-enabled").checked = !!e.punch.enabled;
+  li.querySelector(".edit-punch-type").value = e.punch.type || "zoom";
+  li.querySelector(".edit-punch-time").value = e.punch.time;
+  li.querySelector(".edit-punch-duration").value = e.punch.duration;
+  li.querySelector(".edit-punch-intensity").value = e.punch.intensity;
+  li.querySelector(".edit-punch-type").addEventListener("change", (ev) => {
+    li.querySelector(".edit-punch-intensity").value = PUNCH_DEFAULT_INTENSITY[ev.target.value] ?? 25;
+  });
+
+  li.querySelector(".edit-sfx-enabled").checked = !!e.sound_effect.enabled;
+  li.querySelector(".edit-sfx-path").value = e.sound_effect.audio_path || "";
+  li.querySelector(".edit-sfx-time").value = e.sound_effect.time;
+  li.querySelector(".edit-sfx-volume").value = e.sound_effect.volume;
 
   li.querySelector(".edit-watermark-enabled").checked = !!e.watermark.enabled;
   li.querySelector(".edit-watermark-path").value = e.watermark.image_path || "";
@@ -703,6 +736,20 @@ function wireEditPanel(li, clip) {
         enabled: li.querySelector(".edit-subtitle-enabled").checked,
         path: li.querySelector(".edit-subtitle-path").value.trim(),
         size: Number(li.querySelector(".edit-subtitle-size").value) || 24,
+      },
+      meme_filter: li.querySelector(".edit-meme-filter").value,
+      punch: {
+        enabled: li.querySelector(".edit-punch-enabled").checked,
+        type: li.querySelector(".edit-punch-type").value,
+        time: Number(li.querySelector(".edit-punch-time").value) || 0,
+        duration: Number(li.querySelector(".edit-punch-duration").value) || 0.3,
+        intensity: Number(li.querySelector(".edit-punch-intensity").value) || 25,
+      },
+      sound_effect: {
+        enabled: li.querySelector(".edit-sfx-enabled").checked,
+        audio_path: li.querySelector(".edit-sfx-path").value.trim(),
+        time: Number(li.querySelector(".edit-sfx-time").value) || 0,
+        volume: Number(li.querySelector(".edit-sfx-volume").value) || 100,
       },
     };
     await saveProjectNow();

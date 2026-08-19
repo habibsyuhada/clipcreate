@@ -164,9 +164,62 @@
       <div class="edit-section">
         <div class="edit-section-header">
           <span>Teks Overlay</span>
-          <button type="button" class="btn small text-layer-add-btn">+ Tambah Teks</button>
+          <div class="edit-section-header-actions">
+            <button type="button" class="btn small text-layer-add-btn">+ Tambah Teks</button>
+            <button type="button" class="btn small text-layer-meme-add-btn">🎭 Teks Meme (Atas+Bawah)</button>
+          </div>
         </div>
         <div class="text-layers-list"></div>
+      </div>
+      <div class="edit-section">
+        <div class="edit-section-header">
+          <span>🎭 Efek Meme</span>
+        </div>
+        <div class="edit-grid">
+          <label>Filter Visual
+            <select class="edit-meme-filter">
+              <option value="none">Tidak ada</option>
+              <option value="deepfry">Deep-fry</option>
+              <option value="vhs">VHS/Glitch</option>
+              <option value="grayscale">Hitam-Putih</option>
+            </select>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" class="edit-punch-enabled"> Zoom/Shake Punch
+          </label>
+          <label>Jenis Punch
+            <select class="edit-punch-type">
+              <option value="zoom">Zoom Punch</option>
+              <option value="shake">Shake</option>
+              <option value="flash">Flash</option>
+            </select>
+          </label>
+          <label>Waktu (detik dari awal clip)
+            <input type="number" class="edit-punch-time" min="0" step="0.1" value="0.5">
+          </label>
+          <label>Durasi (detik)
+            <input type="number" class="edit-punch-duration" min="0.05" max="5" step="0.05" value="0.3">
+          </label>
+          <label>Intensitas
+            <input type="number" class="edit-punch-intensity" min="1" max="200" step="1" value="25">
+          </label>
+        </div>
+        <p class="hint">Zoom: intensitas = % zoom tambahan (mis. 25 = 1.25x). Shake: intensitas = pixel goyangan. Flash: intensitas = % kecerahan puncak.</p>
+        <div class="edit-grid">
+          <label class="checkbox-label">
+            <input type="checkbox" class="edit-sfx-enabled"> Efek Suara (Sound Effect)
+          </label>
+          <label class="wide">Path Audio (MP3/WAV)
+            <input class="edit-sfx-path text-input" placeholder="path lengkap ke file audio, mis. hasil download myinstants.com">
+          </label>
+          <label>Waktu (detik dari awal clip)
+            <input type="number" class="edit-sfx-time" min="0" step="0.1" value="0.5">
+          </label>
+          <label>Volume (%)
+            <input type="number" class="edit-sfx-volume" min="0" max="300" step="10" value="100">
+          </label>
+        </div>
+        <p class="hint">Audio asli tetap terdengar (kecuali Mute dicentang di atas) — efek suara dicampur (mix) di titik waktu yang diminta.</p>
       </div>
       <div class="edit-grid">
         <label class="checkbox-label">
@@ -231,6 +284,9 @@
     <input type="number" class="text-layer-size" min="8" max="200" value="36" title="Ukuran font">
     <input type="color" class="text-layer-color" value="#ffffff" title="Warna teks">
     <input type="color" class="text-layer-outline" value="#000000" title="Warna outline">
+    <label class="text-layer-meme-label" title="Kapital semua + outline lebih tebal, gaya teks meme klasik">
+      <input type="checkbox" class="text-layer-meme"> Meme
+    </label>
     <button type="button" class="btn small danger text-layer-remove-btn">✕</button>
   </div>
 </template>
