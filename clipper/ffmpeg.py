@@ -12,8 +12,45 @@ CROP_RATIOS = {
     "16:9": (16, 9),
 }
 
-TEXT_POSITIONS = {"top", "middle", "bottom"}
 CROP_ANCHORS = {"left", "center", "right"}
+
+GRID_POSITIONS = {
+    "top-left", "top-center", "top-right",
+    "middle-left", "middle-center", "middle-right",
+    "bottom-left", "bottom-center", "bottom-right",
+}
+_LEGACY_POSITION_MAP = {"top": "top-center", "middle": "middle-center", "bottom": "bottom-center"}
+
+TEXT_POSITION_XY = {
+    "top-left": ("40", "40"),
+    "top-center": ("(w-text_w)/2", "40"),
+    "top-right": ("w-text_w-40", "40"),
+    "middle-left": ("40", "(h-text_h)/2"),
+    "middle-center": ("(w-text_w)/2", "(h-text_h)/2"),
+    "middle-right": ("w-text_w-40", "(h-text_h)/2"),
+    "bottom-left": ("40", "h-text_h-40"),
+    "bottom-center": ("(w-text_w)/2", "h-text_h-40"),
+    "bottom-right": ("w-text_w-40", "h-text_h-40"),
+}
+
+
+def _overlay_xy(position: str, margin: int = 20) -> tuple:
+    mapping = {
+        "top-left": (f"{margin}", f"{margin}"),
+        "top-center": ("(W-w)/2", f"{margin}"),
+        "top-right": (f"W-w-{margin}", f"{margin}"),
+        "middle-left": (f"{margin}", "(H-h)/2"),
+        "middle-center": ("(W-w)/2", "(H-h)/2"),
+        "middle-right": (f"W-w-{margin}", "(H-h)/2"),
+        "bottom-left": (f"{margin}", f"H-h-{margin}"),
+        "bottom-center": ("(W-w)/2", f"H-h-{margin}"),
+        "bottom-right": (f"W-w-{margin}", f"H-h-{margin}"),
+    }
+    return mapping.get(position, mapping["top-right"])
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
 
 
 def ffmpeg_available() -> bool:
@@ -53,6 +90,23 @@ def escape_drawtext(text: str) -> str:
     return text
 
 
+def escape_filter_path(path: str) -> str:
+    """Escape path untuk dipakai sebagai argument filter ffmpeg (mis. subtitles=filename='...')."""
+    path = path.replace("\\", "\\\\")
+    path = path.replace("'", "\\'")
+    path = path.replace(":", "\\:")
+    return path
+
+
+def _all_text_layers(edits: dict) -> list:
+    """Gabungkan `texts` (list layer baru) dengan `text` singular (format lama, untuk backward compat)."""
+    texts = list(edits.get("texts") or [])
+    legacy = edits.get("text")
+    if legacy and legacy.get("content"):
+        texts = texts + [legacy]
+    return [t for t in texts if (t or {}).get("content")]
+
+
 def needs_reencode(edits: dict) -> bool:
     """Tentukan apakah clip butuh re-encode berdasarkan edit yang aktif."""
     if not edits:
@@ -63,8 +117,13 @@ def needs_reencode(edits: dict) -> bool:
     speed = float(edits.get("speed", 1.0) or 1.0)
     if abs(speed - 1.0) > 1e-6:
         return True
-    text = edits.get("text") or {}
-    if text.get("content"):
+    if _all_text_layers(edits):
+        return True
+    watermark = edits.get("watermark") or {}
+    if watermark.get("enabled") and watermark.get("image_path"):
+        return True
+    subtitle = edits.get("subtitle") or {}
+    if subtitle.get("enabled") and subtitle.get("path"):
         return True
     audio = edits.get("audio") or {}
     if audio.get("mute"):
@@ -129,25 +188,28 @@ def _text_filter(text_cfg: dict) -> str | None:
     content = (text_cfg or {}).get("content")
     if not content:
         return None
-    position = text_cfg.get("position", "bottom")
-    if position not in TEXT_POSITIONS:
-        position = "bottom"
+    position = text_cfg.get("position", "middle-center")
+    position = _LEGACY_POSITION_MAP.get(position, position)
+    if position not in GRID_POSITIONS:
+        position = "middle-center"
+    x_expr, y_expr = TEXT_POSITION_XY[position]
     size = int(text_cfg.get("size", 36) or 36)
     color = text_cfg.get("color", "white") or "white"
     outline = text_cfg.get("outline", "black") or "black"
 
-    if position == "top":
-        y = "40"
-    elif position == "middle":
-        y = "(h-text_h)/2"
-    else:
-        y = "h-text_h-40"
-
     escaped = escape_drawtext(content)
     return (
         f"drawtext=text='{escaped}':fontcolor={color}:fontsize={size}:"
-        f"borderw=2:bordercolor={outline}:x=(w-text_w)/2:y={y}"
+        f"borderw=2:bordercolor={outline}:x={x_expr}:y={y_expr}"
     )
+
+
+def _subtitle_filter(sub_cfg: dict) -> str | None:
+    if not sub_cfg or not sub_cfg.get("enabled") or not sub_cfg.get("path"):
+        return None
+    path = escape_filter_path(sub_cfg["path"])
+    size = int(sub_cfg.get("size", 24) or 24)
+    return f"subtitles=filename='{path}':force_style='FontSize={size}'"
 
 
 def build_video_filters(edits: dict, width: int, height: int) -> list:
@@ -160,9 +222,14 @@ def build_video_filters(edits: dict, width: int, height: int) -> list:
     if crop_f:
         filters.append(crop_f)
 
-    text_f = _text_filter(edits.get("text") or {})
-    if text_f:
-        filters.append(text_f)
+    for text_cfg in _all_text_layers(edits):
+        text_f = _text_filter(text_cfg)
+        if text_f:
+            filters.append(text_f)
+
+    sub_f = _subtitle_filter(edits.get("subtitle") or {})
+    if sub_f:
+        filters.append(sub_f)
 
     speed = float(edits.get("speed", 1.0) or 1.0)
     if abs(speed - 1.0) > 1e-6:
@@ -223,14 +290,34 @@ def build_cut_command(
             output_path,
         ]
 
+    watermark = edits.get("watermark") or {}
+    watermark_path = watermark.get("image_path") if watermark.get("enabled") else None
+
     # re-encode (akurat): -ss setelah -i agar frame-accurate
-    cmd = ["ffmpeg", "-y", "-i", input_path, "-ss", f"{start:.3f}", "-t", f"{duration:.3f}"]
+    cmd = ["ffmpeg", "-y", "-i", input_path]
+    if watermark_path:
+        cmd += ["-loop", "1", "-i", watermark_path]
+    cmd += ["-ss", f"{start:.3f}", "-t", f"{duration:.3f}"]
 
     video_filters = build_video_filters(edits, width, height)
     audio_filters = build_audio_filters(edits, duration)
 
-    if video_filters:
-        cmd += ["-vf", ",".join(video_filters)]
+    if watermark_path:
+        wm_scale_pct = _clamp(float(watermark.get("scale", 20) or 20), 5, 100)
+        wm_opacity = _clamp(float(watermark.get("opacity", 100) or 100), 0, 100) / 100
+        wm_w = max(int(width * wm_scale_pct / 100), 2)
+        x_expr, y_expr = _overlay_xy(watermark.get("position", "top-right"))
+
+        base_chain = ",".join(video_filters) if video_filters else "null"
+        filter_complex = (
+            f"[0:v]{base_chain}[base];"
+            f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={wm_opacity:.3f}[wm];"
+            f"[base][wm]overlay={x_expr}:{y_expr}:shortest=1[vout]"
+        )
+        cmd += ["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"]
+    else:
+        if video_filters:
+            cmd += ["-vf", ",".join(video_filters)]
 
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
 
@@ -245,15 +332,36 @@ def build_cut_command(
     return cmd
 
 
-def build_normalize_command(input_path: str, output_path: str, width: int, height: int, fps: int) -> list:
-    """Samakan resolusi/fps sebelum concat."""
+def build_normalize_command(
+    input_path: str, output_path: str, width: int, height: int, fps: int, has_audio: bool = True
+) -> list:
+    """Samakan resolusi/fps/audio sebelum concat atau transisi.
+
+    Kalau clip sumber tidak punya audio (mis. di-mute), tambahkan silent audio track
+    supaya tetap ada stream audio yang konsisten untuk di-concat/crossfade.
+    """
+    vf = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}"
+    )
+    if has_audio:
+        return [
+            "ffmpeg", "-y",
+            "-i", input_path,
+            "-vf", vf,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-ar", "48000", "-ac", "2",
+            "-movflags", "+faststart",
+            output_path,
+        ]
     return [
         "ffmpeg", "-y",
         "-i", input_path,
-        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}",
+        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+        "-vf", vf,
+        "-map", "0:v:0", "-map", "1:a:0", "-shortest",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-c:a", "aac", "-ar", "48000",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2",
         "-movflags", "+faststart",
         output_path,
     ]
@@ -265,6 +373,83 @@ def build_concat_command(list_file: str, output_path: str) -> list:
         "-f", "concat", "-safe", "0",
         "-i", list_file,
         "-c", "copy",
+        output_path,
+    ]
+
+
+TRANSITIONS = {"fade", "dissolve"}
+
+
+def build_transition_merge_command(
+    paths: list, durations: list, output_path: str, transition: str, trans_duration: float
+) -> list:
+    """Gabung beberapa video (sudah dinormalisasi resolusi/fps/audio-nya sama) dengan crossfade
+    berantai (xfade untuk video, acrossfade untuk audio). offset transisi ke-i dihitung dari
+    akumulasi durasi asli tiap clip dikurangi i * durasi transisi (rumus xfade berantai standar)."""
+    cmd = ["ffmpeg", "-y"]
+    for p in paths:
+        cmd += ["-i", p]
+
+    v_filters = []
+    a_filters = []
+    v_label = "0:v"
+    a_label = "0:a"
+    cumulative = durations[0]
+    n = len(paths)
+    for i in range(1, n):
+        offset = cumulative - trans_duration * i
+        out_v = f"v{i}" if i < n - 1 else "vout"
+        out_a = f"a{i}" if i < n - 1 else "aout"
+        v_filters.append(
+            f"[{v_label}][{i}:v]xfade=transition={transition}:duration={trans_duration:.3f}:offset={offset:.3f}[{out_v}]"
+        )
+        a_filters.append(f"[{a_label}][{i}:a]acrossfade=d={trans_duration:.3f}[{out_a}]")
+        v_label, a_label = out_v, out_a
+        cumulative += durations[i]
+
+    filter_complex = ";".join(v_filters + a_filters)
+    cmd += [
+        "-filter_complex", filter_complex,
+        "-map", "[vout]", "-map", "[aout]",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    return cmd
+
+
+def has_audio_stream(path: str) -> bool:
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=index",
+        "-of", "csv=p=0",
+        path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode == 0 and result.stdout.strip() != ""
+
+
+def build_thumbnail_command(input_path: str, timestamp: float, output_path: str, width: int = 160) -> list:
+    """Ekstrak satu frame thumbnail. -ss sebelum -i = fast seek (keyframe terdekat), cukup akurat untuk preview."""
+    return [
+        "ffmpeg", "-y",
+        "-ss", f"{max(timestamp, 0):.3f}",
+        "-i", input_path,
+        "-frames:v", "1",
+        "-vf", f"scale={width}:-2",
+        "-q:v", "4",
+        output_path,
+    ]
+
+
+def build_waveform_command(input_path: str, output_path: str, width: int = 1600, height: int = 120, color: str = "5eb0ef") -> list:
+    return [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-filter_complex", f"aformat=channel_layouts=mono,showwavespic=s={width}x{height}:colors=0x{color}",
+        "-frames:v", "1",
         output_path,
     ]
 
