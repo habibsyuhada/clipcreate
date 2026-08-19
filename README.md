@@ -13,7 +13,20 @@ Aplikasi lokal untuk memotong video (mis. hasil download YouTube) menjadi bebera
 - Gabung (merge) beberapa clip terpilih menjadi satu file, resolusi/fps/audio otomatis disamakan sebelum digabung. Opsional pilih transisi antar clip (Fade / Dissolve) dengan durasi custom — otomatis dinonaktifkan (fallback ke potongan langsung) kalau ada clip yang terlalu pendek untuk durasi transisi yang diminta.
 - Daftar clip & pengaturan editnya tersimpan otomatis ke file JSON di sebelah video sumber — buka lagi videonya, daftar clip muncul kembali.
 
-## Instalasi
+## Download Desktop App (tanpa install Python)
+
+Setiap release punya build desktop siap pakai untuk Windows/macOS/Linux — tinggal download, extract, jalankan, tanpa perlu install Python atau `pip install` apa pun.
+
+1. Buka halaman [Releases](../../releases), download file `VideoClipper-<os>.zip` sesuai OS kamu.
+2. Extract zip-nya.
+3. Jalankan `VideoClipper.exe` (Windows) atau `VideoClipper` (macOS/Linux) di dalam folder hasil extract.
+
+Window desktop akan terbuka otomatis (tidak perlu buka browser manual).
+
+- **Windows:** FFmpeg ikut dibundel di dalam build-nya — benar-benar tinggal jalankan tanpa instalasi apa pun.
+- **macOS/Linux:** FFmpeg **belum** dibundel, harus terinstall terpisah (lihat langkah [FFmpeg](#1-ffmpeg) di bawah) — tanpa itu aplikasi tetap jalan tapi fitur render tidak berfungsi. Khusus Linux, kalau package `libwebkit2gtk`/PyGObject belum terpasang, window desktop otomatis fallback membuka aplikasi di browser default (server tetap jalan di background).
+
+## Instalasi (dari source)
 
 ### 1. FFmpeg
 
@@ -43,6 +56,15 @@ Lalu buka `http://localhost:8000` di browser.
 
 Jika FFmpeg belum terpasang, aplikasi tetap jalan tapi akan menampilkan peringatan jelas (di terminal saat start, dan badge merah di UI) — fitur render tidak akan berfungsi sampai FFmpeg terpasang.
 
+Alternatif: jalankan sebagai window desktop (pywebview) alih-alih buka browser manual:
+
+```bash
+pip install -r requirements.txt -r requirements-desktop.txt
+python desktop.py
+```
+
+Ini membuka jendela native yang menjalankan server FastAPI di background pada port lokal acak — tidak perlu buka browser manual. Kalau backend GTK/QT/WebKit tidak tersedia di sistem (umum di sebagian distro Linux minimal), otomatis fallback membuka aplikasi di browser default.
+
 ## Cara Pakai Singkat
 
 1. Klik **Buka Video**, navigasi folder di server lalu pilih file video (atau paste path lengkap dan tekan Enter).
@@ -52,22 +74,9 @@ Jika FFmpeg belum terpasang, aplikasi tetap jalan tapi akan menampilkan peringat
 5. Untuk menggabungkan beberapa clip: klik **Merge Mode**, centang clip yang ingin digabung (urutan mengikuti urutan di daftar — pakai tombol ↑/↓ untuk mengatur ulang), isi nama file, klik **Merge & Render**.
 6. Hasil render ada di folder `clips/` di sebelah file video sumber.
 
-## Desktop App (Windows)
+## Build Desktop App Sendiri
 
-Video Clipper juga bisa dijalankan sebagai aplikasi desktop (jendela native, bukan tab browser) lewat [pywebview](https://pywebview.flowrl.com/), dan di-build jadi satu file `.exe` portable dengan [PyInstaller](https://pyinstaller.org/) — FFmpeg ikut dibundel di dalam exe-nya, jadi tinggal jalankan tanpa instalasi apa pun.
-
-### Cara build (tanpa perlu mesin Windows)
-
-Repo ini sudah ada GitHub Actions workflow (`.github/workflows/build-windows.yml`) yang otomatis:
-1. Download static build FFmpeg untuk Windows.
-2. Build `VideoClipper.exe` pakai PyInstaller di runner `windows-latest`.
-3. Upload hasilnya sebagai artifact (bisa didownload dari tab **Actions** di GitHub setelah run selesai).
-
-Jalankan lewat tab **Actions → Build Windows Desktop App → Run workflow**, atau otomatis terpicu tiap push tag `v*`.
-
-> ⚠️ Build ini memakai FFmpeg static build dari [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) (varian "essentials", lisensi GPL). Kalau exe hasil build ini didistribusikan ke orang lain, pastikan mematuhi ketentuan lisensi GPL FFmpeg (mis. sediakan source code / tautan ke source FFmpeg yang dipakai).
-
-### Build manual di mesin Windows sendiri
+**Windows** (satu file `.exe`, FFmpeg ikut dibundel):
 
 ```powershell
 pip install -r requirements.txt -r requirements-desktop.txt
@@ -76,33 +85,38 @@ pyinstaller build_windows.spec
 # hasil: dist\VideoClipper.exe
 ```
 
-### Jalan langsung tanpa build (dev/testing, semua OS)
+**macOS/Linux** (folder executable, FFmpeg harus terinstall terpisah di sistem):
 
 ```bash
 pip install -r requirements.txt -r requirements-desktop.txt
-python desktop.py
+pyinstaller desktop.spec
+# hasil: dist/VideoClipper/
 ```
 
-Ini membuka jendela native yang menjalankan server FastAPI di background pada port lokal acak — tidak perlu buka browser manual. Catatan: logika server/threading sudah diverifikasi lewat automated test di sandbox Linux, tapi lapisan jendela native (WebView2) hanya bisa diverifikasi penuh di mesin Windows asli — jadi coba jalankan `dist\VideoClipper.exe` hasil build sendiri untuk memastikan sebelum didistribusikan.
+Release resmi (zip untuk Windows/macOS/Linux) dibuild otomatis oleh GitHub Actions (`.github/workflows/release.yml`) setiap kali tag versi (`v*`) di-push, lalu diunggah ke halaman [Releases](../../releases). Workflow ini juga bisa dijalankan manual lewat tab **Actions → Build desktop app & release → Run workflow** (hasil build-nya jadi artifact, tanpa publish release, kalau dijalankan tanpa tag).
+
+> ⚠️ Build Windows memakai FFmpeg static build dari [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) (varian "essentials", lisensi GPL). Kalau exe hasil build ini didistribusikan ke orang lain, pastikan mematuhi ketentuan lisensi GPL FFmpeg (mis. sediakan source code / tautan ke source FFmpeg yang dipakai).
 
 ## Struktur Project
 
 ```
 clipcreate/
-├── app.py              # Entry point FastAPI
-├── desktop.py           # Entry point desktop (pywebview + server di background thread)
-├── build_windows.spec   # Config PyInstaller untuk build VideoClipper.exe
+├── app.py                    # Entry point FastAPI
+├── desktop.py                 # Entry point desktop (pywebview + server di background thread)
+├── build_windows.spec         # Config PyInstaller untuk build VideoClipper.exe (Windows, FFmpeg dibundel)
+├── desktop.spec                # Config PyInstaller untuk build desktop macOS/Linux
 ├── clipper/
-│   ├── ffmpeg.py        # Builder perintah FFmpeg (cut, crop, speed, text, audio, concat)
-│   ├── jobs.py           # Render queue & status (background, non-blocking)
-│   ├── projects.py       # Load/save daftar clip ke JSON
-│   └── thumbnails.py     # Generate & cache thumbnail sprite + waveform untuk timeline
+│   ├── ffmpeg.py               # Builder perintah FFmpeg (cut, crop, speed, text, audio, concat)
+│   ├── jobs.py                  # Render queue & status (background, non-blocking)
+│   ├── projects.py              # Load/save daftar clip ke JSON
+│   └── thumbnails.py            # Generate & cache thumbnail sprite + waveform untuk timeline
 ├── static/
 │   ├── index.html
-│   ├── style.css        # Dark mode
+│   ├── style.css               # Dark mode
 │   └── app.js
+├── .github/workflows/release.yml  # Build & release otomatis (Windows/macOS/Linux) saat tag v* di-push
 ├── requirements.txt
-├── requirements-desktop.txt  # Dependency tambahan untuk desktop app (pywebview, pyinstaller)
+├── requirements-desktop.txt    # Dependency tambahan untuk desktop app (pywebview, pyinstaller)
 └── README.md
 ```
 

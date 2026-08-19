@@ -10,3 +10,4 @@ clips/
 build/
 dist/
 vendor/
+*.zip

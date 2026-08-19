@@ -2,7 +2,9 @@
 pakai pywebview, server FastAPI jalan di background thread di port lokal acak.
 
 Jalankan langsung: python desktop.py
-Build jadi satu file .exe (Windows): lihat build_windows.spec + README bagian "Desktop App".
+Build jadi satu file .exe (Windows, FFmpeg ikut dibundel): lihat build_windows.spec.
+Build untuk macOS/Linux: lihat desktop.spec.
+Lihat README bagian "Desktop App" untuk detail.
 """
 
 import os
@@ -16,14 +18,14 @@ import uvicorn
 
 def bundled_dir() -> str | None:
     """Kalau jalan sebagai exe hasil PyInstaller (onefile), return folder ekstraksi sementara
-    tempat ffmpeg.exe/ffprobe.exe & static/ ikut dibundel. None kalau jalan sebagai skrip biasa."""
+    tempat ffmpeg(.exe)/ffprobe(.exe) & static/ ikut dibundel. None kalau jalan sebagai skrip biasa."""
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     return None
 
 
 def prepare_ffmpeg_path() -> None:
-    """Supaya shutil.which("ffmpeg") nemu binary yang dibundel PyInstaller."""
+    """Supaya shutil.which("ffmpeg") nemu binary yang dibundel PyInstaller (kalau ada)."""
     bundled = bundled_dir()
     if bundled:
         os.environ["PATH"] = bundled + os.pathsep + os.environ.get("PATH", "")
@@ -68,14 +70,30 @@ def main() -> None:
 
     import webview
 
+    url = f"http://127.0.0.1:{port}"
     webview.create_window(
         "Video Clipper",
-        f"http://127.0.0.1:{port}",
+        url,
         width=1280,
         height=860,
         min_size=(960, 640),
     )
-    webview.start()
+    try:
+        webview.start()
+    except Exception:
+        # Tidak ada backend GTK/QT/WebKit tersedia (umum di sebagian distro Linux tanpa
+        # PyGObject/webkit2gtk terpasang). Fallback: buka browser default, server tetap
+        # jalan di background selama proses ini hidup.
+        import webbrowser
+
+        webbrowser.open(url)
+        print(f"Window desktop tidak tersedia di sistem ini. Video Clipper dibuka di browser: {url}")
+        print("Biarkan terminal ini tetap terbuka. Tekan Ctrl+C untuk keluar.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

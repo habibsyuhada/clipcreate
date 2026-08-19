@@ -16,7 +16,7 @@ from clipper import jobs
 from clipper import projects
 from clipper import thumbnails as thumbs
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
