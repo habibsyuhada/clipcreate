@@ -107,6 +107,9 @@ MEME_FILTERS = {
 
 PUNCH_TYPES = {"zoom", "shake", "flash"}
 
+TIMELAPSE_MIN_FACTOR = 2
+TIMELAPSE_MAX_FACTOR = 120
+
 
 def _meme_filter_chain(name: str) -> list:
     return list(MEME_FILTERS.get(name or "none", []))
@@ -167,10 +170,25 @@ def _all_text_layers(edits: dict) -> list:
     return [t for t in texts if (t or {}).get("content")]
 
 
+def _timelapse_factor(edits: dict) -> float | None:
+    """Faktor kecepatan timelapse (2x-120x) kalau mode timelapse aktif, else None.
+
+    Timelapse menggantikan (bukan menambah) edit Kecepatan biasa, dan audio selalu
+    dibuang karena di kecepatan setinggi ini audio hasil atempo tidak lagi berguna.
+    """
+    timelapse = edits.get("timelapse") or {}
+    if not timelapse.get("enabled"):
+        return None
+    factor = _clamp(float(timelapse.get("factor", 8) or 8), TIMELAPSE_MIN_FACTOR, TIMELAPSE_MAX_FACTOR)
+    return factor
+
+
 def needs_reencode(edits: dict) -> bool:
     """Tentukan apakah clip butuh re-encode berdasarkan edit yang aktif."""
     if not edits:
         return False
+    if _timelapse_factor(edits) is not None:
+        return True
     crop = edits.get("crop", "original")
     if crop and crop != "original":
         return True
@@ -309,7 +327,8 @@ def build_video_filters(edits: dict, width: int, height: int, clip_start: float 
     if sub_f:
         filters.append(sub_f)
 
-    speed = float(edits.get("speed", 1.0) or 1.0)
+    timelapse_factor = _timelapse_factor(edits)
+    speed = timelapse_factor if timelapse_factor is not None else float(edits.get("speed", 1.0) or 1.0)
     if abs(speed - 1.0) > 1e-6:
         filters.append(f"setpts=PTS/{speed:.6f}")
 
@@ -317,6 +336,9 @@ def build_video_filters(edits: dict, width: int, height: int, clip_start: float 
 
 
 def build_audio_filters(edits: dict, clip_duration: float) -> list:
+    if _timelapse_factor(edits) is not None:
+        return None  # timelapse: audio selalu dibuang (-an), atempo di kecepatan ini sudah tidak berguna
+
     audio = edits.get("audio") or {}
     if audio.get("mute"):
         return None  # sinyal: buang audio track (-an)

@@ -74,6 +74,7 @@ function defaultEdits() {
     crop: "original",
     crop_anchor: "center",
     speed: 1,
+    timelapse: { enabled: false, factor: 8 },
     texts: [],
     audio: { volume: 100, fade_in: 0, fade_out: 0, mute: false },
     watermark: { enabled: false, image_path: "", position: "top-right", scale: 20, opacity: 100 },
@@ -96,6 +97,7 @@ function normalizeEdits(edits) {
     ...base,
     ...edits,
     audio: { ...base.audio, ...(edits.audio || {}) },
+    timelapse: { ...base.timelapse, ...(edits.timelapse || {}) },
     watermark: { ...base.watermark, ...(edits.watermark || {}) },
     subtitle: { ...base.subtitle, ...(edits.subtitle || {}) },
     punch: { ...base.punch, ...(edits.punch || {}) },
@@ -119,8 +121,13 @@ function editBadges(edits) {
   if (!edits) return [];
   const badges = [];
   if (edits.crop && edits.crop !== "original") badges.push(edits.crop);
-  const speed = Number(edits.speed || 1);
-  if (Math.abs(speed - 1) > 1e-6) badges.push(`${speed}x`);
+  const timelapse = edits.timelapse || {};
+  if (timelapse.enabled) {
+    badges.push(`⏩ timelapse ${timelapse.factor}x`);
+  } else {
+    const speed = Number(edits.speed || 1);
+    if (Math.abs(speed - 1) > 1e-6) badges.push(`${speed}x`);
+  }
   const texts = (edits.texts || []).filter((t) => t.content);
   if (texts.length === 1) badges.push(texts[0].meme ? "teks meme" : "teks");
   else if (texts.length > 1) badges.push(`teks x${texts.length}`);
@@ -677,6 +684,16 @@ function wireEditPanel(li, clip) {
   li.querySelector(".edit-fadeout").value = e.audio.fade_out;
   li.querySelector(".edit-mute").checked = !!e.audio.mute;
 
+  const timelapseCheckbox = li.querySelector(".edit-timelapse-enabled");
+  const timelapseFactorInput = li.querySelector(".edit-timelapse-factor");
+  timelapseCheckbox.checked = !!e.timelapse.enabled;
+  timelapseFactorInput.value = e.timelapse.factor || 8;
+  const syncTimelapseDisabled = () => {
+    li.querySelector(".edit-speed").disabled = timelapseCheckbox.checked;
+  };
+  timelapseCheckbox.addEventListener("change", syncTimelapseDisabled);
+  syncTimelapseDisabled();
+
   const textsList = li.querySelector(".text-layers-list");
   textsList.innerHTML = "";
   (e.texts || []).forEach((layer) => addTextLayerRow(textsList, layer));
@@ -718,6 +735,10 @@ function wireEditPanel(li, clip) {
       crop: li.querySelector(".edit-crop").value,
       crop_anchor: li.querySelector(".edit-anchor").value,
       speed: Number(li.querySelector(".edit-speed").value),
+      timelapse: {
+        enabled: li.querySelector(".edit-timelapse-enabled").checked,
+        factor: clamp(Number(li.querySelector(".edit-timelapse-factor").value) || 8, 2, 120),
+      },
       texts: readTextLayers(textsList),
       audio: {
         volume: Number(li.querySelector(".edit-volume").value),
@@ -913,6 +934,67 @@ function pollMergeJob(jobId, statusEl) {
       clearInterval(interval);
     }
   }, 1200);
+}
+
+// ---------- Auto Caption (speech-to-text) ----------
+
+$("#autoCaptionBtn").addEventListener("click", async () => {
+  if (!state.videoPath) return;
+  const btn = $("#autoCaptionBtn");
+  const statusEl = $("#autoCaptionStatus");
+  const language = $("#captionLanguage").value;
+  btn.disabled = true;
+  statusEl.classList.remove("hidden");
+  statusEl.textContent = "Memulai transkripsi... (unduh model AI sekali di percobaan pertama, bisa beberapa menit)";
+  try {
+    const res = await api("/api/caption/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_path: state.videoPath, language }),
+    });
+    pollCaptionJob(res.job_id, res.output_path, statusEl, btn);
+  } catch (e) {
+    statusEl.textContent = `Gagal memulai auto caption: ${e.message}`;
+    btn.disabled = false;
+  }
+});
+
+function pollCaptionJob(jobId, outputPath, statusEl, btn) {
+  const interval = setInterval(async () => {
+    try {
+      const res = await api(`/api/jobs?ids=${jobId}`);
+      const job = res.jobs[0];
+      if (!job) return;
+      if (job.status === "done") {
+        clearInterval(interval);
+        btn.disabled = false;
+        statusEl.textContent = `Caption selesai: ${outputPath}`;
+        await applyCaptionToAllClips(outputPath);
+      } else if (job.status === "error") {
+        clearInterval(interval);
+        btn.disabled = false;
+        statusEl.textContent = `Auto caption gagal: ${job.error}`;
+      } else {
+        statusEl.textContent = `Status: ${job.status}...`;
+      }
+    } catch (e) {
+      clearInterval(interval);
+      btn.disabled = false;
+    }
+  }, 1500);
+}
+
+// Terapkan .srt hasil auto caption sebagai burn-in subtitle ke semua clip yang ada
+// (timestamp caption relatif ke timeline video sumber, jadi otomatis sinkron di tiap clip).
+async function applyCaptionToAllClips(srtPath) {
+  if (!state.clips.length) return;
+  state.clips.forEach((clip) => {
+    clip.edits = normalizeEdits(clip.edits);
+    clip.edits.subtitle.enabled = true;
+    clip.edits.subtitle.path = srtPath;
+  });
+  await saveProjectNow();
+  renderAll();
 }
 
 // ---------- Keyboard shortcuts ----------

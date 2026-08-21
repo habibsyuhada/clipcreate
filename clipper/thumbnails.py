@@ -57,6 +57,11 @@ def _save_meta(assets_dir: str, meta: dict) -> None:
     os.replace(tmp_path, _meta_path(assets_dir))
 
 
+def assets_dir(video_path: str) -> str:
+    """Folder cache tersembunyi di sebelah video (dipakai juga oleh modul lain, mis. captions.py)."""
+    return _assets_dir(video_path)
+
+
 def sprite_path(video_path: str) -> str:
     return os.path.join(_assets_dir(video_path), "thumbs.jpg")
 
