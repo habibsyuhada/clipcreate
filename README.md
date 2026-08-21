@@ -1,13 +1,14 @@
 # Video Clipper
 
-Aplikasi lokal untuk memotong video (mis. hasil download YouTube) menjadi beberapa clip, dengan fitur edit dasar berbasis FFmpeg. Jalan sepenuhnya offline di komputer sendiri — tidak butuh internet sama sekali.
+Aplikasi lokal untuk memotong video (mis. hasil download YouTube) menjadi beberapa clip, dengan fitur edit dasar berbasis FFmpeg. Jalan sepenuhnya offline di komputer sendiri — tidak butuh internet sama sekali, kecuali fitur Auto Caption yang butuh internet satu kali saja untuk mengunduh model AI-nya (lihat bagian [Fitur](#fitur)).
 
 ## Fitur
 
 - Buka video lokal (browser file di server, atau paste path lengkap), player HTML5 dengan seek cepat (HTTP Range).
 - Tandai start/end clip dari posisi playhead atau ketik timestamp manual, banyak clip per video.
 - Timeline visual dengan thumbnail sprite (preview frame) dan waveform audio di background — memudahkan cari posisi potong presisi. Arahkan mouse ke timeline untuk preview frame (hover scrubbing). Thumbnail & waveform di-cache otomatis (regenerate hanya kalau file video berubah), keyboard shortcut `I`/`O`/`Space`/`←`/`→`.
-- Edit per clip (opsional): crop 9:16 / 1:1 / 16:9 dengan anchor, kecepatan 0.5x–2x, volume/fade/mute audio, multi-layer teks overlay (posisi grid 9 titik), watermark gambar (PNG/JPG dengan opacity & skala), dan burn-in subtitle dari file `.srt`.
+- **Auto Caption** — transkripsi otomatis audio video jadi subtitle (`.srt`) lewat tombol "🤖 Auto Caption", pakai speech-to-text offline ([faster-whisper](https://github.com/SYSTRAN/faster-whisper), auto-detect bahasa atau pilih Indonesia/Inggris manual). Setelah selesai, subtitle otomatis diterapkan (burn-in) ke semua clip yang ada — tinggal render seperti biasa. Model AI didownload sekali dari internet saat pertama kali dipakai (±150MB), setelah itu berjalan sepenuhnya offline.
+- Edit per clip (opsional): crop 9:16 / 1:1 / 16:9 dengan anchor, kecepatan 0.5x–2x, mode **Timelapse** (kecepatan 2x–120x, audio otomatis dibuang), volume/fade/mute audio, multi-layer teks overlay (posisi grid 9 titik), watermark gambar (PNG/JPG dengan opacity & skala), dan burn-in subtitle dari file `.srt` (manual atau hasil Auto Caption).
 - Efek meme: teks meme klasik satu klik (kapital, outline tebal, atas+bawah) lewat toggle "Meme" di tiap layer teks; filter visual Deep-fry / VHS-glitch / Hitam-putih untuk seluruh clip; efek "punch" sesaat di titik waktu tertentu — Zoom Punch, Shake (goyang kamera), atau Flash — dengan waktu, durasi, dan intensitas yang bisa diatur; dan efek suara (sound effect) — mixing file audio (MP3/WAV) milik sendiri ke titik waktu tertentu di clip, dengan volume yang bisa diatur. Aplikasi tidak menyediakan/mengunduh suara meme apa pun — sediakan file audionya sendiri (pastikan kamu punya hak pakainya).
 - Render clip satu-satu atau semua sekaligus, lewat render queue di background (tidak blocking), status `queued → processing → done/error`.
 - Mode potong cepat (`-c copy`) otomatis dipakai jika clip tanpa edit apa pun, mode akurat (re-encode) otomatis dipakai jika ada edit.
@@ -107,7 +108,8 @@ clipcreate/
 ├── build_windows.spec         # Config PyInstaller untuk build VideoClipper.exe (Windows, FFmpeg dibundel)
 ├── desktop.spec                # Config PyInstaller untuk build desktop macOS/Linux
 ├── clipper/
-│   ├── ffmpeg.py               # Builder perintah FFmpeg (cut, crop, speed, text, audio, concat)
+│   ├── ffmpeg.py               # Builder perintah FFmpeg (cut, crop, speed, timelapse, text, audio, concat)
+│   ├── captions.py              # Auto caption: transkripsi audio -> .srt via faster-whisper
 │   ├── jobs.py                  # Render queue & status (background, non-blocking)
 │   ├── projects.py              # Load/save daftar clip ke JSON
 │   └── thumbnails.py            # Generate & cache thumbnail sprite + waveform untuk timeline
@@ -132,4 +134,6 @@ clipcreate/
 - Thumbnail sprite (JPEG) & waveform (PNG) di-generate via FFmpeg lalu di-cache di folder tersembunyi `.<namavideo>.assets/` di sebelah video; regenerate otomatis kalau ukuran/waktu-modifikasi video berubah.
 - Transisi merge memakai filter `xfade` (video) + `acrossfade` (audio) berantai; durasi transisi otomatis di-clamp/dinonaktifkan kalau lebih panjang dari clip terpendek. Clip yang di-mute tetap diberi silent audio track saat merge supaya stream audio konsisten untuk crossfade.
 - Watermark gambar pakai filter `overlay` (posisi grid 9 titik, skala relatif lebar video, opacity via `colorchannelmixer`). Subtitle burn-in pakai filter `subtitles` dengan timestamp `.srt` yang tetap merujuk ke timeline video sumber (bukan relatif ke clip), jadi subtitle yang didownload terpisah dari video asli otomatis sinkron.
+- Timelapse memakai filter `setpts` yang sama dengan Kecepatan biasa tapi dengan faktor lebih besar (2x–120x) dan menggantikannya (bukan menumpuk); audio selalu dibuang (`-an`) karena di kecepatan setinggi ini hasil `atempo` sudah tidak berguna.
+- Auto Caption jalan sebagai job di render queue yang sama (`clipper/jobs.py`), pakai [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (model `small`, CPU, quantized int8) untuk transkripsi audio video sumber (bukan per-clip) jadi satu file `.srt` yang di-cache di folder `.<namavideo>.assets/` — sekali digenerate, otomatis sinkron ke semua clip karena timestamp-nya relatif ke timeline video sumber. Model AI didownload otomatis dari Hugging Face Hub saat pertama kali dipakai (perlu internet sekali itu saja); ini satu-satunya bagian aplikasi yang butuh internet.
 - Project lama yang masih pakai format teks overlay lama (satu layer, field `text`) otomatis dimigrasikan ke format `texts` (multi-layer) saat dibuka di UI maupun saat di-render.

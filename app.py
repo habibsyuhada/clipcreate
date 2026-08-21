@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from clipper import captions
 from clipper import ffmpeg as ff
 from clipper import jobs
 from clipper import projects
@@ -35,6 +36,11 @@ class RenderPayload(BaseModel):
     video_path: str
     clip_ids: list | None = None
     mode: str | None = None  # "auto" (default) | "copy" | "reencode"
+
+
+class CaptionPayload(BaseModel):
+    video_path: str
+    language: str | None = None  # "auto" (default) | "id" | "en"
 
 
 class MergePayload(BaseModel):
@@ -331,6 +337,23 @@ def render(payload: RenderPayload):
 def get_jobs(ids: str):
     id_list = [i for i in ids.split(",") if i]
     return {"jobs": jobs.list_jobs(id_list)}
+
+
+# ---------- Auto caption (speech-to-text) ----------
+
+@app.post("/api/caption/generate")
+def generate_caption(payload: CaptionPayload):
+    video_path = _require_file(payload.video_path)
+    language = captions.LANGUAGE_CHOICES.get(payload.language or "auto", None)
+    output_path = captions.srt_output_path(video_path)
+
+    def fn():
+        captions.transcribe_to_srt(video_path, output_path, language=language)
+
+    job_id = jobs.submit_job(
+        fn, meta={"video_path": video_path, "kind": "caption", "output_path": output_path}
+    )
+    return {"job_id": job_id, "output_path": output_path}
 
 
 # ---------- Merge / concat ----------

@@ -63,10 +63,19 @@
     <div class="clips-header">
       <h2>Daftar Clip</h2>
       <div class="clips-actions">
+        <label class="merge-transition-label">Bahasa Caption
+          <select id="captionLanguage">
+            <option value="auto" selected>Auto-detect</option>
+            <option value="id">Indonesia</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <button id="autoCaptionBtn" class="btn small">🤖 Auto Caption</button>
         <button id="renderAllBtn" class="btn primary small">Render All</button>
         <button id="mergeModeBtn" class="btn small">Merge Mode</button>
       </div>
     </div>
+    <p id="autoCaptionStatus" class="mono small-text hidden"></p>
 
     <div id="mergeBar" class="merge-bar hidden">
       <input id="mergeName" class="text-input" placeholder="nama file gabungan, mis. final.mp4">
@@ -160,7 +169,14 @@
         <label class="checkbox-label">
           <input type="checkbox" class="edit-mute"> Mute
         </label>
+        <label class="checkbox-label">
+          <input type="checkbox" class="edit-timelapse-enabled"> ⏩ Mode Timelapse
+        </label>
+        <label>Faktor Timelapse (x)
+          <input type="number" class="edit-timelapse-factor" min="2" max="120" step="1" value="8">
+        </label>
       </div>
+      <p class="hint">Timelapse menggantikan Kecepatan biasa di atas dan otomatis membuang audio (di kecepatan setinggi ini audio tidak lagi berguna).</p>
       <div class="edit-section">
         <div class="edit-section-header">
           <span>Teks Overlay</span>
